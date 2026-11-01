@@ -13,9 +13,10 @@ from datetime import datetime, timezone
 from typing import Any, Iterator
 
 from sqlalchemy import (JSON, BigInteger, Boolean, DateTime, Float, ForeignKey, Integer, String, UniqueConstraint,
-                        create_engine, event, func, select)
+                        create_engine, event, func, select, update)
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column, sessionmaker
+from sqlalchemy.orm.attributes import set_committed_value
 
 JSONType = JSON().with_variant(JSONB(), "postgresql")
 
@@ -183,10 +184,18 @@ class Database:
 
 
 def append_events(s: Session, job: Job, events: list[tuple[str, dict]]) -> None:
-    """Append events to a job's log; `job` must be loaded in session `s`."""
-    for typ, data in events:
-        job.event_seq += 1
-        s.add(JobEvent(job_id=job.id, seq=job.event_seq, type=typ, data=data))
+    """Append events to a job's log; `job` must be loaded in session `s`.
+
+    The sequence numbers are reserved with one atomic UPDATE ... RETURNING, which also locks the job
+    row until commit: the API (cancel) and a worker may append to the same job concurrently, and a
+    read-increment-write of `job.event_seq` would hand both the same numbers."""
+    if not events:
+        return
+    last = s.execute(update(Job).where(Job.id == job.id).values(event_seq=Job.event_seq + len(events))
+                     .returning(Job.event_seq).execution_options(synchronize_session=False)).scalar_one()
+    set_committed_value(job, "event_seq", last)
+    for seq, (typ, data) in enumerate(events, start=last - len(events) + 1):
+        s.add(JobEvent(job_id=job.id, seq=seq, type=typ, data=data))
 
 
 def month_start(now: datetime | None = None) -> datetime:
