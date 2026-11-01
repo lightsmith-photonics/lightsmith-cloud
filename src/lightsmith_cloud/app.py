@@ -153,8 +153,12 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--workers", type=int, help="local mode: concurrent solver processes (default 1)")
     p.add_argument("--data-dir", help="local mode: SQLite database and results directory")
     p.add_argument("--openapi", metavar="PATH", help="write the OpenAPI document and exit")
-    p.add_argument("command", nargs="?", choices=["serve", "migrate"], default="serve",
-                   help="serve (default) or migrate: upgrade the database schema and exit")
+    p.add_argument("--dry-run", action="store_true", help="stripe-setup: print what would be created, call nothing")
+    p.add_argument("--no-portal", action="store_true", help="stripe-setup: skip the customer-portal configuration")
+    p.add_argument("command", nargs="?", choices=["serve", "migrate", "stripe-setup", "billing-sync"], default="serve",
+                   help="serve (default); migrate: upgrade the database schema and exit; stripe-setup: create the "
+                        "Stripe test-mode meter, products, prices and portal configuration from STRIPE_SECRET_KEY "
+                        "and print their ids; billing-sync: resend failed Stripe meter events (for cron)")
     a = p.parse_args(argv)
 
     over = {k: v for k, v in {"host": a.host, "port": a.port, "mode": a.mode, "local_workers": a.workers,
@@ -168,6 +172,20 @@ def main(argv: list[str] | None = None) -> int:
         db = Database(settings.db_url)
         migrate.upgrade(db.engine)
         print(json.dumps({"migrated": migrate.current_revision(db.engine)}))
+        db.dispose()
+        return 0
+    if a.command == "stripe-setup":
+        from . import stripe_setup
+
+        return stripe_setup.main(settings, dry=a.dry_run, portal=not a.no_portal)
+    if a.command == "billing-sync":
+        from .billing import StripeBilling
+        from .db import Database
+
+        db = Database(settings.db_url)
+        db.prepare(auto_migrate=False)
+        with db.session() as s:
+            print(json.dumps(StripeBilling(settings).sync_usage(s, limit=5000)))
         db.dispose()
         return 0
     if a.openapi:

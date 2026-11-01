@@ -60,6 +60,8 @@ class JobCreated(BaseModel):
     status: JobStatus
     credits_estimate: float | None = None
     queue: str | None = None
+    quota_warning: str | None = Field(None, description="Hosted: set when this job takes the org past the soft "
+                                      "limit of its monthly credits or into billed overage.")
 
 
 class Usage(BaseModel):
@@ -114,6 +116,20 @@ class CheckoutRequest(_In):
     plan: Literal["pro", "team"]
     success_url: str = Field(max_length=2000)
     cancel_url: str = Field(max_length=2000)
+
+
+class PlanChange(_In):
+    plan: Literal["pro", "team"]
+
+
+class CreditLimit(_In):
+    monthly_credit_limit: int | None = Field(None, ge=0, le=10**9, description="Most credits the org may use per "
+                                             "month (null: the plan's hard limit).")
+
+
+class CapOverride(_In):
+    credit_cap_override: int | None = Field(None, ge=0, le=10**10, description="Replaces the plan's monthly hard "
+                                            "limit for this org (null: back to the plan's).")
 
 
 class PortalRequest(_In):

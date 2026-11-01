@@ -163,7 +163,10 @@ def test_hosted_job_is_queued_run_and_metered(hosted):
     c = hosted.client
     key = new_key(hosted)
     with hosted.ctx.db.session() as s:
-        s.get(Org, org_of(hosted, key)).stripe_customer_id = "cus_test_1"
+        org = s.get(Org, org_of(hosted, key))
+        org.stripe_customer_id, org.plan = "cus_test_1", "pro"
+        # Only overage goes to Stripe: start just past the included credits (0.9 into overage).
+        s.add(UsageRecord(org_id=org.id, job_id="b" * 32, credits=PLANS["pro"].monthly_credits + 0.9))
     est = c.post("/v1/estimate", json={"simulation": gold_sphere()}, headers=key).json()
     assert est["credits_estimate"] >= 1 and est["queue"] == "gpu-24g" and est["fits_plan"]
     r = c.post("/v1/jobs", json={"simulation": gold_sphere()}, headers=key)
@@ -176,15 +179,18 @@ def test_hosted_job_is_queued_run_and_metered(hosted):
     assert job["status"] == "succeeded", job["error"]
     assert job["usage"]["credits"] > 0 and job["result"]["method"] == "mie"
     usage = c.get("/v1/usage", headers=key).json()
-    assert usage["credits_used"] == pytest.approx(job["usage"]["credits"])
+    assert usage["credits_used"] == pytest.approx(PLANS["pro"].monthly_credits + 0.9 + job["usage"]["credits"])
+    assert usage["state"] == "overage"
     events = hosted.stripe.named("meter_events.create")
     assert len(events) == 1
     assert events[0]["payload"]["stripe_customer_id"] == "cus_test_1"
     with hosted.ctx.db.session() as s:
-        rec = s.execute(select(UsageRecord)).scalar_one()
+        rec = s.execute(select(UsageRecord).where(UsageRecord.job_id == jid)).scalar_one()
         assert events[0]["identifier"] == f"usage_{rec.id}" and rec.stripe_reported_at is not None
+        assert rec.overage_credits == pytest.approx(rec.credits)
+        assert events[0]["payload"]["value"] == str(rec.billable_units) == str(int(0.9 + rec.credits))
     admin = c.get("/v1/admin/usage", headers={"Authorization": f"Bearer {ADMIN}"}).json()
-    assert admin["totals"]["jobs"] == 1 and admin["jobs_by_status"] == {"succeeded": 1}
+    assert admin["totals"]["jobs"] == 2 and admin["jobs_by_status"] == {"succeeded": 1}
     # other orgs cannot read it
     assert c.get(f"/v1/jobs/{jid}", headers=token("user-2")).status_code == 404
 
@@ -358,7 +364,9 @@ def test_identity_is_ids_only(hosted):
         assert s.get(Org, "user:same-user") is not None
         assert set(c.name for c in Org.__table__.columns) == {"id", "plan", "stripe_customer_id",
                                                                "stripe_subscription_id", "subscription_status",
-                                                               "created_at"}
+                                                               "current_period_end", "cancel_at_period_end",
+                                                               "billing_event_at", "credit_limit",
+                                                               "credit_cap_override", "created_at"}
 
 
 def test_org_claims_and_header(hosted):

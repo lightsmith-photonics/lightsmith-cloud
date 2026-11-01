@@ -102,6 +102,64 @@ LIGHTSMITH_MODE=hosted DATABASE_URL=... REDIS_URL=... LIGHTSMITH_API_KEY_PEPPER=
 - `proposals/library-progress.diff` adds an optional `progress` callback to `solve`/`compare`.
   The child already uses it when present.
 
+## Stripe billing (test mode only)
+
+Paid GPU compute uses Stripe Checkout, the customer portal, one Billing Meter for overage credits and
+signed webhooks. The rules (credits, quotas, overage, failed payments) and the contract for the
+platform's pricing and billing pages are in [API.md](API.md#account-and-billing). The service refuses
+live keys (`sk_live_`) at start-up and live-mode webhook events, so nothing here can charge real money.
+
+**Set-up, once per Stripe test account.** You need the test secret key from the Stripe dashboard
+(test mode, Developers → API keys). Keep it in your shell or in `.env`, which is never committed. The
+setup command reads it from `STRIPE_SECRET_KEY` and never prints or stores it.
+
+1. See what will be created. This calls nothing:
+
+   ```bash
+   uv run lightsmith-server stripe-setup --dry-run
+   ```
+
+2. Create the meter, the pro and team products with their monthly prices, the metered overage prices
+   and a customer-portal configuration. It prints the ids to add to `.env`:
+
+   ```bash
+   STRIPE_SECRET_KEY=sk_test_... uv run lightsmith-server stripe-setup
+   ```
+
+   With compose, run `docker compose run --rm api lightsmith-server stripe-setup` instead; it reads
+   the key from `.env`. Running it again finds the same objects and creates nothing. Amounts come from
+   `PLANS` in `src/lightsmith_cloud/billing.py`; Stripe prices cannot be edited, so to change one,
+   archive it in the dashboard and run the command again.
+
+3. Add the printed `LIGHTSMITH_STRIPE_*` lines to `.env`.
+
+4. Webhooks. For local testing, the Stripe CLI forwards test events and prints a signing secret
+   (`whsec_...`); put it in `STRIPE_WEBHOOK_SECRET`:
+
+   ```bash
+   stripe listen --forward-to localhost:8200/v1/billing/webhook --events checkout.session.completed,customer.subscription.created,customer.subscription.updated,customer.subscription.deleted,invoice.paid,invoice.payment_failed
+   ```
+
+   For a deployed API, add an endpoint `https://<api host>/v1/billing/webhook` with the same events in
+   the dashboard (test mode), and use its signing secret.
+
+5. Upgrade the database (revision `0002` adds the billing columns), then restart the API and workers:
+
+   ```bash
+   uv run lightsmith-server migrate
+   ```
+
+6. Try it from the platform's billing page, or call `POST /v1/billing/checkout` with a platform JWT
+   and open the returned URL. Pay with the test card `4242 4242 4242 4242` (any future date, any CVC).
+   To test a failed renewal, switch the card to `4000 0000 0000 0341` in the portal and advance the
+   subscription with a Stripe test clock; the org then gets free-plan limits until an invoice is paid.
+
+7. Schedule `lightsmith-server billing-sync` (every 15 minutes, say) to resend meter events that
+   failed. Stripe accepts meter events up to 35 days old.
+
+`GET /v1/admin/orgs/{id}` shows an org's subscription state, its usage records with their meter
+status, and the Stripe events applied to it.
+
 ## Database migrations
 
 Models live in `src/lightsmith_cloud/db.py` and migrations in `src/lightsmith_cloud/migrations/`.
@@ -114,7 +172,7 @@ uv run python -c "from sqlalchemy import create_engine; from lightsmith_cloud im
 ## Tests
 
 ```bash
-uv run pytest                    # local end-to-end, security, Cloud (fakeredis + RQ), Stripe webhooks, migrations
+uv run pytest                    # local end-to-end, security, Cloud (fakeredis + RQ), Stripe billing, migrations
 uv run pytest -m gpu             # the GPU job test (skipped without CUDA)
 ```
 
@@ -122,6 +180,14 @@ To run the Cloud tests against Postgres (the database is wiped before each test)
 
 ```bash
 LIGHTSMITH_TEST_DATABASE_URL=postgresql+psycopg://user:pw@localhost/db uv run pytest tests/test_hosted.py
+```
+
+The billing tests run the real `stripe` library against responses recorded from stripe-mock
+(`tests/fixtures/stripe/`). To also check every request against Stripe's API spec, run stripe-mock:
+
+```bash
+docker run --rm -d -p 12111:12111 stripe/stripe-mock:latest
+STRIPE_MOCK_URL=http://localhost:12111 uv run pytest tests/test_billing.py
 ```
 
 ## Licence

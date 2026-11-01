@@ -1,0 +1,48 @@
+{
+ "configuration": "bpc_1Pgc7HB7WZ01zgkWxH2EPWRX",
+ "created": 1234567890,
+ "customer": "cus_x",
+ "customer_account": null,
+ "flow": {
+  "after_completion": {
+   "hosted_confirmation": {
+    "custom_message": null
+   },
+   "redirect": {
+    "return_url": "return_url"
+   },
+   "type": "hosted_confirmation"
+  },
+  "customer_update": {},
+  "subscription_cancel": {
+   "retention": {
+    "coupon_offer": {
+     "coupon": "coupon"
+    },
+    "type": "coupon_offer"
+   },
+   "subscription": "subscription"
+  },
+  "subscription_update": {
+   "subscription": "subscription"
+  },
+  "subscription_update_confirm": {
+   "discounts": null,
+   "items": [
+    {
+     "id": null,
+     "price": null
+    }
+   ],
+   "subscription": "subscription"
+  },
+  "type": "subscription_update"
+ },
+ "id": "bps_RdJ5VSaYwzWip4d",
+ "livemode": true,
+ "locale": null,
+ "object": "billing_portal.session",
+ "on_behalf_of": null,
+ "return_url": "https://example.com/account",
+ "url": "https://sangeekp-15t6ai--customer_portal-mydev.dev.stripe.me/session/{SESSION_SECRET}"
+}

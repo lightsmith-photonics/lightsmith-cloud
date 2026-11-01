@@ -36,10 +36,11 @@ only.
   | 402 | `QuotaExceeded` |
   | 403 | `Forbidden` |
   | 404 | `NotFound`, including another org's jobs |
-  | 409 | `NoResult` |
+  | 409 | `NoResult`, `AlreadySubscribed`, `NoActiveSubscription` |
   | 413 | `PayloadTooLarge`, `SpecTooLarge` |
   | 422 | `ValidationError`, `SpecTooLarge`, `UnknownMethod`, `UnsupportedProblem`, `TooLarge`, `TooLargeForPlan`, `Timeout` / `MemoryLimitExceeded` (estimate) |
   | 429 | `RateLimited` (with `Retry-After`), `ConcurrencyLimit` |
+  | 502 | `BillingError` (Stripe refused or failed a call; the message is Stripe's) |
   | 503 | `QueueUnavailable`, `BillingDisabled` |
 
 - **Ids and timestamps.** Job ids are 32 lowercase hex characters. Org and user ids are the
@@ -111,7 +112,9 @@ Returns the library's `estimate()` output plus `estimated_runtime_s`. It never s
  "device": "auto",                // auto | cpu | gpu | cuda:N | torch-cpu
  "label": "optional text"}
 ```
-Returns `{"job_id", "id", "status": "queued", "credits_estimate": null|number, "queue": null|"gpu-24g"}`.
+Returns `{"job_id", "id", "status": "queued", "credits_estimate": null|number, "queue": null|"gpu-24g",
+"quota_warning": null|string}`. `quota_warning` (hosted) is set when the job takes the org past 80% of
+its included credits, or into billed overage.
 
 The spec, method names and the backend's ability to run the problem are all checked **before** the
 job is queued, so a mistake gives an immediate 422. In hosted mode the same call also does
@@ -254,24 +257,93 @@ operators.
 
 ### Account and billing
 
-| Endpoint | Returns |
-|---|---|
-| `GET /v1/me` | `{kind, user_id, role, api_key_id, org: {id, plan, subscription_status}, plan: {…limits}, usage}` |
-| `GET /v1/usage` | `{period_start, credits_used, credits_included, credits_remaining, overage_allowed}` (calendar month, UTC) |
-| `GET /v1/plans` (public) | plan limits; 1 credit = 1 GPU-second on the base tier |
-| `POST /v1/billing/checkout` | Stripe Checkout URL. Body `{plan: "pro"|"team", success_url, cancel_url}`; URLs must start with `LIGHTSMITH_PUBLIC_WEB_URL`. |
-| `POST /v1/billing/portal` | Stripe customer portal URL. Body `{return_url}`. |
-| `POST /v1/billing/webhook` | Stripe webhook. The signature is verified and test-mode events only are accepted. |
+| Endpoint | Auth | Returns or does |
+|---|---|---|
+| `GET /v1/me` | any | `{kind, user_id, role, api_key_id, org: {id, plan, subscription_status}, plan: {…limits}, usage: Usage}` |
+| `GET /v1/usage` | any | `Usage` (below) |
+| `GET /v1/plans` | public | `{credit_unit, currency: "usd", plans: [Plan]}` |
+| `GET /v1/billing` | any | `Billing` (below): everything a billing page shows, in one call |
+| `POST /v1/billing/checkout` | JWT | `{url}` of a Stripe Checkout page. Body `{plan: "pro"|"team", success_url, cancel_url}`. `409 AlreadySubscribed` if the org already has a subscription. |
+| `POST /v1/billing/portal` | JWT | `{url}` of the Stripe customer portal (invoices, payment method, cancel at period end). Body `{return_url}`. |
+| `POST /v1/billing/plan` | JWT | Switches an active subscription between `pro` and `team`, prorated. Body `{plan}`. Returns `{status: "pending"|"unchanged", plan, previous_plan?}`; the plan changes when Stripe's webhook arrives. `409 NoActiveSubscription` without one. |
+| `PUT /v1/billing/limits` | JWT | Sets the org's own monthly spending cap. Body `{monthly_credit_limit: int|null}`. Returns `Usage`. |
+| `POST /v1/billing/webhook` | Stripe signature | Stripe webhook; test-mode events only. |
+
+"JWT" means a platform login token. API keys get `403` on those endpoints, so a leaked key cannot
+change billing. Redirect URLs must start with `LIGHTSMITH_PUBLIC_WEB_URL`.
+
+```ts
+Plan = {name: "free"|"pro"|"team", monthly_credits, overage: boolean, hard_limit_credits,
+        monthly_price_usd, overage_usd_per_credit,
+        purchasable: boolean,                  // a Stripe price is configured for it
+        max_concurrent_jobs, max_runtime_s, max_memory_bytes, host_memory_bytes, rate_limit_per_minute, max_spec_bytes}
+Usage = {period_start, period_end,             // calendar month, UTC
+         plan,                                 // the plan whose limits apply now (the effective plan)
+         credits_used, credits_reserved,       // reserved: estimates of queued and running jobs
+         credits_included, credits_remaining,  // remaining = included - used, never below 0
+         overage_allowed, overage_credits, overage_usd_per_credit,
+         soft_limit,                           // 80% of included (LIGHTSMITH_QUOTA_SOFT_LIMIT_FRACTION)
+         hard_limit,                           // most credits this month, overage included
+         credit_limit: int|null,               // the org's own cap, if set
+         state: "ok"|"soft_limit"|"overage"|"blocked"}
+Billing = {billing_enabled, test_mode: true,
+           org: {id, plan, effective_plan,
+                 subscription_status: null|"active"|"trialing"|"past_due"|"unpaid"|"canceled"|"incomplete"|
+                                      "incomplete_expired"|"paused",
+                 current_period_end: timestamp|null, cancel_at_period_end, has_customer},
+           payment_issue: boolean,             // past_due, unpaid or incomplete
+           actions: {checkout: ("pro"|"team")[], change_plan: ("pro"|"team")[], portal: boolean},
+           usage: Usage, plans: Plan[]}
+```
+
+#### Quotas and billing rules
+- **Credits.** 1 credit = 1 GPU-second on the base tier (`gpu-24g`). The 80 GB tier costs 3 credits
+  per second and CPU-only solves cost 0.25. Every finished job is metered from its solver's wall
+  time. Failures caused by the service are not charged.
+- **Period.** Quotas are per calendar month (UTC) on every plan. Stripe invoices on the
+  subscription's own monthly cycle, and overage is billed on the invoice whose period contains it.
+- **Included credits and overage.** Free has 1,800 credits and no overage. Pro and team may go past
+  their included credits up to their hard limit. Only the credits beyond the included ones are sent
+  to Stripe, as whole credits (the floor of the month's running total), at the plan's overage price.
+- **Admission.** A new job is refused with `402 QuotaExceeded` when this month's usage, plus the
+  estimates of the org's queued and running jobs, plus this job's estimate, would pass the hard limit.
+  The error carries `plan`, `hard_limit`, `credits_used` and `credits_reserved`. The quota never stops
+  a running job; how far a job can overshoot is bounded by the plan's runtime cap.
+- **Hard limit.** The plan's `hard_limit_credits` (an operator can replace it per org), lowered by the
+  org's own `credit_limit` if set.
+- **Failed payment.** When Stripe reports a failed invoice (`past_due`, `unpaid`), the org keeps its
+  plan name but gets the free plan's limits until an invoice is paid. A deleted subscription returns
+  the org to `free`.
+- **Webhook events handled:** `checkout.session.completed`; `customer.subscription.created`,
+  `.updated`, `.deleted` (and `.paused`, `.resumed`); `invoice.paid`, `invoice.payment_succeeded` and
+  `invoice.payment_failed`. Each event id is applied once (`outcome: "duplicate"` on redelivery).
+  Stripe does not guarantee delivery order, so an event older than the last one applied to the org is
+  skipped (`outcome: "stale"`). A handler error returns 500, so Stripe retries.
+
+#### For the platform (Community): what to call and what to show
+Call these server-side with the user's platform JWT (`aud: "compute"`, with `org_id` set to the org
+being billed). Never send API keys from the browser.
+
+| Page | Call | Show |
+|---|---|---|
+| Pricing (public) | `GET /v1/plans` | One card per plan: `monthly_price_usd` per month; `monthly_credits / 3600` GPU-hours included on the base tier; `overage_usd_per_credit × 3600` per extra GPU-hour; `max_runtime_s`, `max_concurrent_jobs`, `max_memory_bytes`. Show the subscribe button only when `purchasable`. Label prices "test mode" while Stripe is in test mode. |
+| Subscribe | `POST /v1/billing/checkout` with `{plan, success_url: <web>/settings/billing?checkout=success, cancel_url: <web>/pricing}` | Redirect the browser to `url`. On return, poll `GET /v1/billing` until `org.plan` is the new plan (the webhook usually lands within seconds). |
+| Billing settings | `GET /v1/billing` | Plan and status. The renewal date `current_period_end`, or "ends on …" when `cancel_at_period_end`. A usage bar of `credits_used` against `credits_included`, with `credits_reserved` as a pending segment and the overage beyond it (`overage_credits × overage_usd_per_credit` as "overage so far"). `hard_limit` and `credit_limit`. Buttons from `actions`: Subscribe (`checkout`), Switch to … (`change_plan`, then `POST /v1/billing/plan`), Manage billing (`portal`, then `POST /v1/billing/portal` and redirect). |
+| Alerts | `GET /v1/billing` | When `payment_issue`: "Payment failed: GPU jobs are limited to the free plan until the invoice is paid", with Manage billing. By `usage.state`: `soft_limit` "80% of the included credits used"; `overage` "overage is billed per credit"; `blocked` "monthly limit reached: new jobs are refused until `period_end`". |
+| Spending cap | `PUT /v1/billing/limits` with `{monthly_credit_limit}` | A number input (empty = the plan's hard limit), for org admins only (the platform decides who). |
+| Job submit | `POST /v1/jobs` | Show `quota_warning` when present. On `402 QuotaExceeded`, show the message with a link to billing settings. |
 
 ### Admin (role `admin`)
 
 | Endpoint | Returns or does |
 |---|---|
-| `GET /v1/admin/usage?since=&until=&org_id=` | per org: `jobs`, `runtime_s`, `gpu_seconds`, `credits`, `credits_unreported_to_stripe`; plus `jobs_by_status` and `totals` |
-| `GET /v1/admin/usage/daily?days=30` | usage per day |
-| `GET /v1/admin/orgs` | the list of orgs |
+| `GET /v1/admin/usage?since=&until=&org_id=` | per org: `jobs`, `runtime_s`, `gpu_seconds`, `credits`, `overage_credits`, `billable_units`, `credits_unreported_to_stripe`, `units_unreported_to_stripe`; plus `jobs_by_status` and `totals` |
+| `GET /v1/admin/usage/daily?days=30` | usage per day, with `billable_units` |
+| `GET /v1/admin/orgs` | the orgs, with billing state and `usage` |
+| `GET /v1/admin/orgs/{id}` | one org: billing state, `usage`, its latest `usage_records` (with Stripe meter status and error) and the `stripe_events` applied to it (with `outcome`) |
 | `PUT /v1/admin/orgs/{id}/plan` | sets an org's plan; body `{plan}` |
-| `POST /v1/admin/billing/sync` | retries Stripe meter events that failed |
+| `PUT /v1/admin/orgs/{id}/limits` | replaces the plan's hard limit for one org; body `{credit_cap_override: int|null}` |
+| `POST /v1/admin/billing/sync` | resends Stripe meter events that failed (also `lightsmith-server billing-sync`, for cron) |
 
 ## Limits
 
@@ -306,11 +378,11 @@ Local mode has no runtime or memory cap on jobs unless `LIGHTSMITH_JOB_TIMEOUT_S
 
 **Hosted plans** (`GET /v1/plans`):
 
-| Plan | Included credits / month | Concurrent jobs | Runtime cap | Memory cap | Requests / min |
-|---|---|---|---|---|---|
-| free | 1,800 | 1 | 5 min | 16 GiB | 60 |
-| pro | 36,000 + metered overage | 4 | 1 h | 72 GiB | 300 |
-| team | 180,000 + metered overage | 16 | 4 h | 72 GiB | 1,200 |
+| Plan | Price / month (test mode) | Included credits / month | Overage | Hard limit / month | Concurrent jobs | Runtime cap | Memory cap | Requests / min |
+|---|---|---|---|---|---|---|---|---|
+| free | $0 | 1,800 | none | 1,800 | 1 | 5 min | 16 GiB | 60 |
+| pro | $29 | 36,000 | $0.0005 / credit | 360,000 | 4 | 1 h | 72 GiB | 300 |
+| team | $129 | 180,000 | $0.0004 / credit | 1,800,000 | 16 | 4 h | 72 GiB | 1,200 |
 
 ## Stability
 
@@ -323,3 +395,7 @@ fields they don't know. Removing or renaming a field, or changing its meaning, r
 - The WebSocket subprotocol is `lightsmith.bearer`.
 - Environment variables use `LIGHTSMITH_` instead of `COMPUTE_`.
 - `/v1/me` no longer returns an org name.
+- Billing (branch `cloud-billing`): `GET /v1/billing`, `POST /v1/billing/plan`,
+  `PUT /v1/billing/limits`, `GET /v1/admin/orgs/{id}` and `PUT /v1/admin/orgs/{id}/limits` are new;
+  `Usage` and `Plan` gained fields; jobs return `quota_warning`. Checkout, portal and plan changes need
+  a platform JWT (API keys get 403). Only overage credits are sent to Stripe.

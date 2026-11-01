@@ -12,7 +12,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from .billing import credits_for, effective_plan
+from .billing import credits_for, effective_plan, record_usage
 from .db import Job, Org, UsageRecord, append_events, utcnow
 from .sandbox import Limits, Outcome, run_job
 from .storage import result_key
@@ -168,11 +168,8 @@ def _record(ctx: "Context", job_id: str, outcome: Outcome, size: int | None, wor
         finish(ses, job, outcome.status, outcome.error)
         status, rec_id = job.status, None
         if billed and job.credits > 0:
-            rec = UsageRecord(org_id=job.org_id, user_id=job.user_id, job_id=job.id, runtime_s=job.runtime_s,
-                              gpu_seconds=job.gpu_seconds, credits=job.credits, queue=job.queue)
-            ses.add(rec)
-            ses.flush()
-            rec_id = rec.id
+            rec_id = record_usage(ses, job.org_id, user_id=job.user_id, job_id=job.id, runtime_s=job.runtime_s,
+                                  gpu_seconds=job.gpu_seconds, credits=job.credits, queue=job.queue).id
     if rec_id and ctx.billing.enabled:  # outside the job transaction: this is a network call
         with ctx.db.session() as ses:
             rec = ses.get(UsageRecord, rec_id)

@@ -17,9 +17,9 @@ from starlette.websockets import WebSocketDisconnect
 
 from .. import __version__
 from ..auth import Principal, authenticate
-from ..billing import check_quota, credits_estimate, effective_plan, estimate_seconds, pick_tier
+from ..billing import admit, credits_estimate, effective_plan, estimate_seconds, pick_tier
 from ..context import Context
-from ..db import ACTIVE, TERMINAL, Job, JobEvent, Org, append_events, as_utc, credits_used, month_start
+from ..db import ACTIVE, TERMINAL, Job, JobEvent, Org, append_events, as_utc
 from ..deps import anonymous, check_id, get_ctx, principal
 from ..errors import ApiError, not_found
 from ..executor import finish
@@ -213,7 +213,7 @@ def create_job(body: JobRequest, request: Request, p: Principal = Depends(princi
     if body.reference and body.kind == "compare" and body.reference not in (methods or []):
         raise ApiError(422, "ValidationError", "reference must be one of methods")
 
-    est, mem, queue, ce, plan = None, None, None, None, None
+    est, mem, queue, ce, plan, warning = None, None, None, None, None, None
     if s_.hosted:
         with ctx.db.session() as s:
             plan = effective_plan(s.get(Org, p.org_id))
@@ -237,7 +237,7 @@ def create_job(body: JobRequest, request: Request, p: Principal = Depends(princi
             if active >= plan.max_concurrent_jobs:
                 raise ApiError(429, "ConcurrencyLimit", f"{active} jobs already queued or running; the "
                                f"{plan.name} plan allows {plan.max_concurrent_jobs}", plan=plan.name)
-            check_quota(s, s.get(Org, p.org_id), plan, credits_used(s, p.org_id, month_start()), ce)
+            warning = admit(s, s.get(Org, p.org_id), plan, ce, s_)
         job = Job(org_id=p.org_id, user_id=p.user_id, api_key_id=p.api_key_id, kind=body.kind,
                   problem_kind=kind_of(sim), method=method,
                   methods=methods, reference=body.reference, device=device, label=body.label, spec=spec,
@@ -251,7 +251,8 @@ def create_job(body: JobRequest, request: Request, p: Principal = Depends(princi
         with ctx.db.session() as s:
             finish(s, s.get(Job, job.id), "failed", {"error": "QueueUnavailable", "message": str(e)[:500]})
         raise ApiError(503, "QueueUnavailable", "could not enqueue the job; try again shortly") from None
-    return {"job_id": job.id, "id": job.id, "status": "queued", "credits_estimate": ce, "queue": queue}
+    return {"job_id": job.id, "id": job.id, "status": "queued", "credits_estimate": ce, "queue": queue,
+            "quota_warning": warning}
 
 
 @router.get("/jobs", response_model=JobList, response_model_exclude_none=False)

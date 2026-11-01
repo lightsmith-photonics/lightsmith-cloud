@@ -125,10 +125,18 @@ class Settings(BaseSettings):
         None, validation_alias=_alias("LIGHTSMITH_STRIPE_SECRET_KEY", "STRIPE_SECRET_KEY"))
     stripe_webhook_secret: SecretStr | None = Field(
         None, validation_alias=_alias("LIGHTSMITH_STRIPE_WEBHOOK_SECRET", "STRIPE_WEBHOOK_SECRET"))
+    # Price ids, printed by `lightsmith-server stripe-setup`: flat monthly prices, and one metered
+    # overage price per plan on the shared Billing Meter. `stripe_price_metered` is the overage price
+    # for plans that have none of their own.
     stripe_price_pro: str | None = None
     stripe_price_team: str | None = None
+    stripe_price_overage_pro: str | None = None
+    stripe_price_overage_team: str | None = None
     stripe_price_metered: str | None = None
     stripe_meter_event_name: str = "lightsmith_credits"
+    stripe_portal_configuration: str | None = None  # bpc_...; the account's default portal settings when unset
+    # Usage warnings start at this fraction of the included credits.
+    quota_soft_limit_fraction: float = Field(0.8, gt=0, le=1)
     # Checkout/portal redirect URLs must start with one of these (no open redirects).
     public_web_url: str = "http://localhost:3000"
 

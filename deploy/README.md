@@ -23,8 +23,10 @@ studio  ──key──►    │  validate, estimate()   ├─► Redis (RQ qu
   CUDA allocator.
 - **Metering.** Each job is billed on the wall time of its solver child: GPU-seconds × the tier's
   credit multiplier, or the CPU multiplier for CPU-only methods such as Mie. One usage record is
-  written per job. One Stripe meter event is sent per record, with `identifier = usage_<id>` so
-  retries are idempotent. `POST /v1/admin/billing/sync` retries any events that failed.
+  written per job. Only credits beyond the plan's included ones are billed: each record sends at
+  most one Stripe meter event, with the whole overage credits it adds and `identifier = usage_<id>`,
+  so retries are idempotent. `lightsmith-server billing-sync` (cron) or `POST /v1/admin/billing/sync`
+  resends events that failed. Stripe set-up and the quota rules are in the main README and API.md.
 - **Failure handling.** Failures caused by the service are not billed: `WorkerCrashed`,
   `AdmissionRejected`, `ServerShutdown`, `WorkerLost` and `StorageError`. A reaper in the API marks
   jobs as `WorkerLost` if they have been running far past every plan's runtime cap.
@@ -196,8 +198,9 @@ the price easy to explain.
 | Concurrent jobs | 1 | 4 | 16 |
 | Max job memory | 16 GB | 72 GB | 72 GB |
 
-These limits are already encoded in `src/lightsmith_cloud/billing.py` (`PLANS`). The prices
-live only in Stripe.
+These limits and prices are encoded in `src/lightsmith_cloud/billing.py` (`PLANS`, with a monthly
+hard limit of 10x the included credits on paid plans). `lightsmith-server stripe-setup` creates the
+matching Stripe test-mode prices; Stripe holds the amounts actually charged.
 
 **Rationale, with all cost figures estimated as above.**
 - A 24 GB GPU-hour costs about $0.45–1.05.

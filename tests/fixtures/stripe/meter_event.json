@@ -1,0 +1,12 @@
+{
+ "created": 1234567890,
+ "event_name": "lightsmith_credits",
+ "identifier": "1234-1234",
+ "livemode": false,
+ "object": "billing.meter_event",
+ "payload": {
+  "stripe_customer_id": "cus_123",
+  "value": "25"
+ },
+ "timestamp": 1234567890
+}

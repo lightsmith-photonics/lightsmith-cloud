@@ -13,7 +13,7 @@ from datetime import datetime, timezone
 from typing import Any, Iterator
 
 from sqlalchemy import (JSON, BigInteger, Boolean, DateTime, Float, ForeignKey, Integer, String, UniqueConstraint,
-                        create_engine, event, func, select, update)
+                        create_engine, event, false, func, select, update)
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column, sessionmaker
 from sqlalchemy.orm.attributes import set_committed_value
@@ -53,6 +53,15 @@ class Org(Base):
     stripe_customer_id: Mapped[str | None] = mapped_column(String(64), index=True, unique=True)
     stripe_subscription_id: Mapped[str | None] = mapped_column(String(64))
     subscription_status: Mapped[str | None] = mapped_column(String(32))
+    current_period_end: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    cancel_at_period_end: Mapped[bool] = mapped_column(Boolean, default=False, server_default=false())
+    # `created` of the last Stripe event applied to the subscription state: older events arrive late
+    # (Stripe does not guarantee order) and must not overwrite newer state.
+    billing_event_at: Mapped[int | None] = mapped_column(BigInteger)
+    # Monthly credit caps: the org's own spending limit (at most the plan's hard limit), and an
+    # operator override that replaces the plan's hard limit.
+    credit_limit: Mapped[int | None] = mapped_column(BigInteger)
+    credit_cap_override: Mapped[int | None] = mapped_column(BigInteger)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
 
@@ -129,6 +138,10 @@ class UsageRecord(Base):
     gpu_seconds: Mapped[float] = mapped_column(Float, default=0.0)
     credits: Mapped[float] = mapped_column(Float, default=0.0)
     queue: Mapped[str | None] = mapped_column(String(64))
+    # Credits beyond the plan's included credits this month, and the whole units of them sent to the
+    # Stripe meter (floor of the running total, so per-job rounding never adds up).
+    overage_credits: Mapped[float] = mapped_column(Float, default=0.0, server_default="0")
+    billable_units: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
     stripe_reported_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     stripe_error: Mapped[str | None] = mapped_column(String(500))
 
@@ -139,6 +152,8 @@ class StripeEvent(Base):
     __tablename__ = "stripe_events"
     id: Mapped[str] = mapped_column(String(100), primary_key=True)
     type: Mapped[str] = mapped_column(String(100))
+    org_id: Mapped[str | None] = mapped_column(String(200), index=True)
+    outcome: Mapped[str | None] = mapped_column(String(32))  # applied | ignored | stale
     received_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
 
@@ -206,4 +221,11 @@ def month_start(now: datetime | None = None) -> datetime:
 def credits_used(s: Session, org_id: str, since: datetime) -> float:
     q = select(func.coalesce(func.sum(UsageRecord.credits), 0.0)).where(
         UsageRecord.org_id == org_id, UsageRecord.created_at >= since)
+    return float(s.execute(q).scalar_one())
+
+
+def credits_reserved(s: Session, org_id: str) -> float:
+    """Estimated credits of the org's queued and running jobs, held against its quota at admission."""
+    q = select(func.coalesce(func.sum(Job.credits_estimate), 0.0)).where(
+        Job.org_id == org_id, Job.status.in_(ACTIVE))
     return float(s.execute(q).scalar_one())
