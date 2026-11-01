@@ -5,7 +5,7 @@
 # The build context is this directory (the lightsmith-cloud repo root). LIBRARY_SPEC is any pip
 # requirement for the scientific library until it is published, e.g.
 #   wheels/lightsmith-0.1.0-py3-none-any.whl                      (a wheel copied into ./wheels)
-#   "lightsmith @ git+https://github.com/<org>/<repo>@<tag>"     (a git URL)
+#   "lightsmith @ git+https://github.com/lightsmith-photonics/lightsmith@<tag>"     (a git URL)
 ARG PYTHON_VERSION=3.12
 
 FROM python:${PYTHON_VERSION}-slim AS build

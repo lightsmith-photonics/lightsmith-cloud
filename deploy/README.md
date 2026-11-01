@@ -79,7 +79,7 @@ docker compose --profile cpu up -d postgres redis migrate api worker-cpu
 **The library dependency.** Until the library is published, `LIBRARY_SPEC` is any pip requirement:
 - A wheel copied into `./wheels`. Build it with `uv build --wheel <library checkout> --out-dir wheels`,
   then set `LIBRARY_SPEC=wheels/lightsmith-0.1.0-py3-none-any.whl`.
-- A git URL: `LIBRARY_SPEC=lightsmith @ git+https://github.com/<org>/<repo>@<tag>`.
+- A git URL: `LIBRARY_SPEC=lightsmith @ git+https://github.com/lightsmith-photonics/lightsmith@<tag>`.
 
 Either way it is installed with `requirements/hosted.txt` as constraints. That file is the pinned
 export of `uv.lock`; regenerate it after `uv lock` with the command at its top.
