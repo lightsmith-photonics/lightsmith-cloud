@@ -97,7 +97,7 @@ LIGHTSMITH_MODE=hosted DATABASE_URL=... REDIS_URL=... LIGHTSMITH_API_KEY_PEPPER=
 **Library seams.**
 - `src/lightsmith_cloud/lib.py` is the only module that imports the library, so moving or renaming
   it is a change to that file and the dependency name.
-- For development the library is a path dependency on a sibling checkout (`../PlasmonHub`). Docker
+- For development the library is a path dependency on a sibling checkout (`../lightsmith`). Docker
   images take it from `LIBRARY_SPEC` instead. Switch to a git or index source once it is published.
 - `proposals/library-progress.diff` adds an optional `progress` callback to `solve`/`compare`.
   The child already uses it when present.
