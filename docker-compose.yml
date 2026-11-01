@@ -1,0 +1,104 @@
+# Lightsmith Cloud on one machine: Postgres, Redis, a one-shot migration, the API, and one GPU worker.
+#
+#   cp .env.example .env                       # fill in secrets (Stripe: TEST keys only) and LIBRARY_SPEC
+#   docker compose build
+#   docker compose up -d                       # needs an NVIDIA GPU (Docker Desktop WSL2 or NVIDIA Container Toolkit)
+#   docker compose --profile cpu up -d postgres redis migrate api worker-cpu   # machines without a GPU
+#
+# Results are shared between API and workers through the `results` volume, or stored in S3 when
+# LIGHTSMITH_S3_BUCKET is set (`--profile s3` starts a local SeaweedFS S3 gateway for that).
+name: lightsmith-cloud
+
+x-build-args: &build-args
+  LIBRARY_SPEC: ${LIBRARY_SPEC:?set LIBRARY_SPEC in .env (wheel path under ./wheels, or a git URL)}
+
+x-app: &app
+  env_file: .env
+  environment: &app-env
+    LIGHTSMITH_MODE: hosted
+    DATABASE_URL: postgresql+psycopg://lightsmith:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}@postgres:5432/lightsmith
+    REDIS_URL: redis://redis:6379/0
+  volumes:
+    - results:/data
+  restart: unless-stopped
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: lightsmith
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+      POSTGRES_DB: lightsmith
+    volumes: [pgdata:/var/lib/postgresql/data]
+    healthcheck: { test: ["CMD-SHELL", "pg_isready -U lightsmith -d lightsmith"], interval: 5s, timeout: 5s, retries: 30 }
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes: [redisdata:/data]
+    healthcheck: { test: ["CMD", "redis-cli", "ping"], interval: 5s, timeout: 5s, retries: 30 }
+    restart: unless-stopped
+
+  migrate:
+    <<: *app
+    image: lightsmith-cloud-api
+    build: { context: ., dockerfile: docker/api.Dockerfile, args: *build-args }
+    command: ["lightsmith-server", "migrate"]
+    restart: "no"
+    depends_on:
+      postgres: { condition: service_healthy }
+
+  api:
+    <<: *app
+    image: lightsmith-cloud-api
+    ports: ["127.0.0.1:8200:8200"]
+    depends_on:
+      migrate: { condition: service_completed_successfully }
+      redis: { condition: service_healthy }
+      s3: { condition: service_healthy, required: false }  # only with --profile s3
+
+  worker:
+    <<: *app
+    image: lightsmith-cloud-worker
+    build: { context: ., dockerfile: docker/worker.Dockerfile, args: *build-args }
+    deploy:
+      resources:
+        reservations:
+          devices: [{ driver: nvidia, count: 1, capabilities: [gpu] }]
+    depends_on:
+      migrate: { condition: service_completed_successfully }
+      redis: { condition: service_healthy }
+      s3: { condition: service_healthy, required: false }  # only with --profile s3
+    # One container per GPU: add more services (or an override file) with device_ids: ["1"], ["2"], ...
+
+  worker-cpu:
+    <<: *app
+    image: lightsmith-cloud-api
+    profiles: ["cpu"]
+    command: ["lightsmith-worker"]
+    environment:
+      <<: *app-env
+      LIGHTSMITH_WORKER_GPU_MEMORY_BYTES: "0"
+      LIGHTSMITH_WORKER_QUEUES: gpu-24g,gpu-80g
+    healthcheck: { test: ["CMD", "lightsmith-worker", "healthcheck"], interval: 30s, timeout: 10s, retries: 3 }
+    depends_on:
+      migrate: { condition: service_completed_successfully }
+      redis: { condition: service_healthy }
+      s3: { condition: service_healthy, required: false }  # only with --profile s3
+
+  s3:
+    # S3-compatible results store for dev (SeaweedFS in S3 gateway mode, no auth; use a managed bucket in
+    # production). Enable with `--profile s3` and the LIGHTSMITH_S3_* lines in .env.
+    image: chrislusf/seaweedfs:3.97
+    profiles: ["s3"]
+    command: ["server", "-dir=/data", "-s3", "-s3.port=8333", "-master.volumeSizeLimitMB=1024"]
+    volumes: [s3data:/data]
+    healthcheck: { test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:9333/cluster/status"], interval: 5s, timeout: 5s, retries: 30 }
+    restart: unless-stopped
+
+volumes:
+  pgdata:
+  redisdata:
+  results:
+  s3data:

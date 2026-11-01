@@ -1,0 +1,9 @@
+# Build context is services/compute (self-contained; becomes the lightsmith-cloud repo root).
+.venv
+**/__pycache__
+**/*.pyc
+.env
+tests
+docker-compose*.yml
+wheels/*
+!wheels/*.whl

@@ -1,0 +1,66 @@
+[project]
+name = "lightsmith-cloud"
+version = "0.1.0"
+description = "Lightsmith job API: the local single-user backend for the studio, and Lightsmith Cloud (multi-tenant hosted GPU compute)."
+readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
+requires-python = ">=3.10"
+dependencies = [
+    "lightsmith",
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.30",
+    "sqlalchemy>=2.0",
+    "alembic>=1.13",
+    "pydantic>=2.6",
+    "pydantic-settings>=2.3",
+    "psutil>=5.9",
+    "pyjwt>=2.8",
+]
+
+[project.optional-dependencies]
+# Hosted mode: Redis queue + GPU workers, Postgres, S3-compatible storage, Stripe (test mode).
+hosted = [
+    "redis>=5.0",
+    "rq>=2.0",
+    "psycopg[binary]>=3.1",
+    "boto3>=1.34",
+    "stripe>=10.0",
+]
+# Local GPU solving (PyTorch CUDA build, see [tool.uv.sources]).
+gpu = ["lightsmith[gpu]"]
+
+[project.scripts]
+lightsmith-server = "lightsmith_cloud.app:main"
+lightsmith-worker = "lightsmith_cloud.worker:main"
+omniscatter-server = "lightsmith_cloud.app:main"  # old name, kept as an alias for now
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/lightsmith_cloud"]
+
+[dependency-groups]
+dev = [
+    "pytest>=8",
+    "httpx>=0.27",
+    "fakeredis>=2.23",
+]
+
+[tool.uv.sources]
+lightsmith = { path = "../PlasmonHub", editable = true }
+torch = [{ index = "pytorch-cu128", marker = "sys_platform == 'win32' or sys_platform == 'linux'" }]
+
+[[tool.uv.index]]
+name = "pytorch-cu128"
+url = "https://download.pytorch.org/whl/cu128"
+explicit = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = [
+    "gpu: needs a CUDA GPU",
+    "redis: hosted-queue tests (fakeredis + RQ)",
+]
