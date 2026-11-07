@@ -195,6 +195,27 @@ def test_hosted_job_is_queued_run_and_metered(hosted):
     assert c.get(f"/v1/jobs/{jid}", headers=token("user-2")).status_code == 404
 
 
+def test_hosted_sweep_is_priced_as_its_solves_and_discretization_needs_auth(hosted):
+    c = hosted.client
+    key = new_key(hosted)
+    with hosted.ctx.db.session() as s:
+        org = s.get(Org, org_of(hosted, key))
+        org.stripe_customer_id, org.plan = "cus_test_2", "pro"
+    one = c.post("/v1/estimate", json={"simulation": gold_sphere(), "method": "mie"}, headers=key).json()
+    body = {"simulation": gold_sphere(), "kind": "sweep", "method": "mie",
+            "sweep": {"path": ["particles", 0, "shape", "radius_nm"], "values": [30, 40, 50]}}
+    r = c.post("/v1/jobs", json=body, headers=key)
+    assert r.status_code == 202, r.text
+    assert r.json()["credits_estimate"] >= 3 * one["credits_estimate"] - 2  # each value is priced
+    hosted.work()
+    job = wait(c, r.json()["job_id"], headers=key)
+    assert job["status"] == "succeeded", job["error"]
+    assert len(job["result"]["results"]) == 3 and job["usage"]["credits"] > 0
+    assert c.post("/v1/discretization", json={"simulation": gold_sphere()}).status_code == 401
+    lay = c.post("/v1/discretization", json={"simulation": gold_sphere(), "method": "lightsmith-mie"}, headers=key)
+    assert lay.status_code == 200 and lay.json()["layout_kind"] == "multipoles"
+
+
 def test_ws_events_auth_by_subprotocol(hosted):
     c = hosted.client
     key = new_key(hosted)

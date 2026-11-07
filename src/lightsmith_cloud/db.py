@@ -84,12 +84,13 @@ class Job(Base):
     org_id: Mapped[str] = mapped_column(String(200), ForeignKey("orgs.id"), index=True)
     user_id: Mapped[str | None] = mapped_column(String(200), index=True)  # platform user id (JWT sub)
     api_key_id: Mapped[str | None] = mapped_column(String(32))
-    kind: Mapped[str] = mapped_column(String(16))  # solve | compare | estimate (optimize reserved)
+    kind: Mapped[str] = mapped_column(String(16))  # solve | compare | estimate | optimize | sweep
     problem_kind: Mapped[str | None] = mapped_column(String(32))
     status: Mapped[str] = mapped_column(String(16), default="queued", index=True)
     method: Mapped[str | None] = mapped_column(String(64))
     methods: Mapped[list | None] = mapped_column(JSONType)
     reference: Mapped[str | None] = mapped_column(String(64))
+    params: Mapped[dict | None] = mapped_column(JSONType)  # sweep: {"path": [...], "values": [...]}
     device: Mapped[str] = mapped_column(String(32), default="auto")
     label: Mapped[str | None] = mapped_column(String(200))
     spec: Mapped[dict] = mapped_column(JSONType)

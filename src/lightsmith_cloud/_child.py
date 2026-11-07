@@ -170,6 +170,14 @@ def run_one(path: str) -> int:
             used = _device_info(out.get("provenance") or {})
             warnings = list(out.get("warnings") or [])
             result_kind = out.get("kind") or "cross_sections"
+        elif req["kind"] == "sweep":
+            out = _sweep(osc, req, device, emit)
+            ok = [r for r in out["results"] if r]
+            used = next((_device_info(r.get("provenance") or {}) for r in ok), {})
+            warnings = [f"{out['values'][i]}: {w}" for i, r in enumerate(out["results"]) if r
+                        for w in (r.get("warnings") or [])]
+            warnings += [f"{out['values'][int(i)]}: {e['error']}: {e['message']}" for i, e in out["errors"].items()]
+            result_kind = "sweep"
         elif req["kind"] == "estimate":
             out = osc.estimate(problem, req.get("method") or "auto", device)
             used, warnings, result_kind = {k: out[k] for k in ("framework", "device") if k in out}, [], "estimate"
@@ -192,8 +200,36 @@ def run_one(path: str) -> int:
         return 1
 
 
+def _sweep(osc, req: dict, device: str, emit) -> dict:
+    """Solve the problem once per value of the swept field (lightsmith_cloud.sweep), in order. A value whose
+    solve fails is recorded in `errors` and the sweep goes on."""
+    from lightsmith_cloud.problem import parse_problem
+    from lightsmith_cloud.sweep import swept_specs
+
+    params = req.get("params") or {}
+    path, values = params["path"], params["values"]
+    method = req.get("method") or "auto"
+    results: list = []
+    errors: dict = {}
+    solve = _solver(osc, emit)
+    n = len(values)
+    for i, (v, spec) in enumerate(zip(values, swept_specs(req["simulation"], path, values))):
+        lo, hi = 0.1 + 0.85 * i / n, 0.1 + 0.85 * (i + 1) / n
+        emit(type="progress", stage="sweep_value", message=f"{'.'.join(map(str, path))} = {v} ({i + 1}/{n})",
+             progress=lo)
+        try:
+            results.append(solve(parse_problem(spec), method, device, lo, hi).model_dump(mode="json"))
+        except MemoryError:
+            raise
+        except Exception as e:  # noqa: BLE001 (one failed value does not end the sweep)
+            results.append(None)
+            errors[str(i)] = {"error": type(e).__name__, "message": str(e)[:2000]}
+    return {"kind": "sweep", "path": path, "values": values, "method": method, "results": results, "errors": errors}
+
+
 def serve() -> int:
-    """Estimate worker: {"id", "simulation", "method", "device"} in, {"id", "ok", "result"|"error"} out."""
+    """Estimate worker: {"id", "op"?, "simulation", "method", "device"} in, {"id", "ok", "result"|"error"} out.
+    `op` is "estimate" (default) or "discretization" (what the backend will discretise; lightsmith.discretization)."""
     proto = _protocol_stream()
     from .lib import osc
 
@@ -202,7 +238,12 @@ def serve() -> int:
             continue
         req = json.loads(line)
         try:
-            est = osc.estimate(req["simulation"], req.get("method") or "auto", req.get("device") or "auto")
+            if req.get("op") == "discretization":
+                if not hasattr(osc, "discretization"):
+                    raise NotImplementedError("this lightsmith has no discretization(); upgrade the library")
+                est = osc.discretization(req["simulation"], req.get("method") or "auto")
+            else:
+                est = osc.estimate(req["simulation"], req.get("method") or "auto", req.get("device") or "auto")
             reply = {"id": req.get("id"), "ok": True, "result": _finite(est)}
         except Exception as e:
             reply = {"id": req.get("id"), "ok": False, "error": type(e).__name__, "message": str(e)[:4000]}

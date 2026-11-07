@@ -12,7 +12,7 @@ JobStatus = Literal["queued", "running", "succeeded", "failed", "cancelled"]
 
 # Job kinds. "optimize" is a solve of an `optimization` problem (inverse design, method "inverse");
 # it streams one progress event per iteration. A plain "solve" of such a problem does the same.
-JOB_KINDS = ("solve", "compare", "estimate", "optimize")
+JOB_KINDS = ("solve", "compare", "estimate", "optimize", "sweep")
 
 
 class _In(BaseModel):
@@ -32,21 +32,34 @@ class EstimateRequest(_In):
     device: str = Field("auto", max_length=16)
 
 
+class DiscretizationRequest(_In):
+    simulation: dict[str, Any] = Field(description=SPEC_DOC + " Alias: `spec`.", validation_alias=_SPEC)
+    method: str = Field("auto", max_length=64, description="Method or backend name, or 'auto' (as for solve).")
+
+
+class SweepParams(_In):
+    path: list[str | int] = Field(min_length=1, max_length=16, description="JSON path of the swept number, e.g. "
+                                  "[\"particles\", 0, \"shape\", \"radius_nm\"] or [\"options\", \"dda\", \"dipoles_per_diameter\"] "
+                                  "(missing objects are created).")
+    values: list[float] = Field(min_length=1, max_length=50, description="The values, solved in this order.")
+
+
 class SupportsRequest(_In):
     simulation: dict[str, Any] = Field(description=SPEC_DOC + " Alias: `spec`.", validation_alias=_SPEC)
 
 
 class JobRequest(_In):
     simulation: dict[str, Any] = Field(description=SPEC_DOC + " Alias: `spec`.", validation_alias=_SPEC)
-    kind: Literal["solve", "compare", "estimate", "optimize"] = Field(
+    kind: Literal["solve", "compare", "estimate", "optimize", "sweep"] = Field(
         "solve", validation_alias=AliasChoices("kind", "operation"),
-        description="solve | compare | estimate (run as a job) | optimize (an optimization problem). "
-                    "Alias: `operation`.")
+        description="solve | compare | estimate (run as a job) | optimize (an optimization problem) | sweep "
+                    "(one solve per value of `sweep.path`). Alias: `operation`.")
     method: str | None = Field("auto", max_length=64, description="solve: method or backend name, or 'auto'.")
     methods: list[str] | None = Field(None, max_length=16, description="compare: methods (default: all applicable).")
     reference: str | None = Field(None, max_length=64, description="compare: reference method (default: Mie if run).")
     device: str = Field("auto", max_length=16, description="auto | cpu | gpu | cuda:N | torch-cpu")
     label: str | None = Field(None, max_length=200, description="Free text shown in job lists.")
+    sweep: SweepParams | None = Field(None, description="sweep: the swept field and its values.")
 
 
 class ErrorBody(BaseModel):
@@ -73,8 +86,9 @@ class Usage(BaseModel):
 class JobView(BaseModel):
     job_id: str
     id: str = Field(description="Same as job_id.")
-    kind: str = Field(description="solve | compare | estimate | optimize.")
+    kind: str = Field(description="solve | compare | estimate | optimize | sweep.")
     operation: str = Field(description="Same as kind.")
+    sweep: dict[str, Any] | None = Field(None, description="sweep jobs: {path, values}.")
     problem_kind: str | None = Field(None, description="scattering | layer_stack | periodic | mode | device | bands | "
                                      "circuit | optimization.")
     status: JobStatus

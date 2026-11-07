@@ -27,7 +27,8 @@ from ..lib import osc
 from ..limits import check_device, check_limits, parse_simulation, resolve_methods
 from ..problem import backends_for, kind_of, n_wavelengths, problem_json_schema
 from ..sandbox import EstimateError
-from ..schemas import JOB_KINDS, EstimateRequest, JobCreated, JobList, JobRequest, JobView, SupportsRequest
+from ..schemas import JOB_KINDS, EstimateRequest, JobCreated, JobList, JobRequest, JobView, DiscretizationRequest, SupportsRequest
+from ..sweep import swept_specs
 
 router = APIRouter(prefix="/v1")
 
@@ -159,6 +160,31 @@ def estimate(body: EstimateRequest, request: Request, p: Principal = Depends(pri
     return _hosted_estimate(ctx, sim, spec, [body.method], plan)
 
 
+# --- discretization ---------------------------------------------------------
+
+
+@router.post("/discretization")
+def discretization(body: DiscretizationRequest, request: Request, p: Principal = Depends(principal)) -> dict[str, Any]:
+    """What the backend will discretise for this problem (grid, mesh, dipole lattice, harmonics, cells, plane
+    waves), with its estimate: `lightsmith.discretization`, run in the same sandboxed child as estimate. Never solves."""
+    ctx = get_ctx(request)
+    sim = parse_simulation(body.simulation)
+    spec = sim.model_dump(mode="json")
+    if ctx.settings.hosted:
+        with ctx.db.session() as s:
+            plan = effective_plan(s.get(Org, p.org_id))
+        _validated(ctx, sim, spec, plan)
+    else:
+        _validated(ctx, sim, spec, None)
+    if ctx.estimator is None:
+        raise ApiError(501, "NotImplemented", "this server runs no estimate worker")
+    try:
+        return ctx.estimator.discretization(spec, body.method)
+    except EstimateError as e:
+        status = 500 if e.error == "WorkerCrashed" else 501 if e.error == "NotImplementedError" else 422
+        raise ApiError(status, e.error, e.message) from None
+
+
 # --- jobs -------------------------------------------------------------------
 
 
@@ -178,6 +204,7 @@ def job_view(ctx: Context, job: Job, *, include_result: bool = True, include_spe
         "warnings": job.warnings, "device_used": job.device_used, "estimate": est,
         "usage": {"runtime_s": job.runtime_s, "gpu_seconds": job.gpu_seconds, "credits": job.credits},
         "result": result, "result_kind": job.result_kind, "result_url": url, "result_bytes": job.result_bytes,
+        "sweep": job.params if job.kind == "sweep" else None,
         "simulation": job.spec if include_spec else None,
     }
 
@@ -208,6 +235,20 @@ def create_job(body: JobRequest, request: Request, p: Principal = Depends(princi
         raise ApiError(422, "ValidationError", f"optimize jobs need an optimization problem, not {kind_of(sim)!r}")
     spec = sim.model_dump(mode="json")
     device = check_device(body.device)
+    swept: list = []
+    if body.kind == "sweep":
+        if body.sweep is None:
+            raise ApiError(422, "ValidationError", "sweep jobs need `sweep`: {path, values}")
+        try:
+            raw = swept_specs(spec, list(body.sweep.path), list(body.sweep.values))
+        except ValueError as e:
+            raise ApiError(422, "ValidationError", str(e)) from None
+        for v, r in zip(body.sweep.values, raw):
+            try:
+                one = parse_simulation(r)
+            except ApiError as e:
+                raise ApiError(422, "ValidationError", f"sweep value {v}: {e.message}") from None
+            swept.append((one, one.model_dump(mode="json")))
     method, methods = resolve_methods(sim, "compare" if body.kind == "compare" else "solve", body.method,
                                       body.methods, s_)
     if body.reference and body.kind == "compare" and body.reference not in (methods or []):
@@ -218,7 +259,16 @@ def create_job(body: JobRequest, request: Request, p: Principal = Depends(princi
         with ctx.db.session() as s:
             plan = effective_plan(s.get(Org, p.org_id))
         _validated(ctx, sim, spec, plan)
-        est = _hosted_estimate(ctx, sim, spec, methods or [method], plan)
+        if swept:
+            for one, one_spec in swept:
+                _validated(ctx, one, one_spec, plan)
+            ests = [_hosted_estimate(ctx, one, one_spec, [method], plan) for one, one_spec in swept]
+            worst = max(ests, key=lambda e: e["memory_bytes"])
+            est = {**worst, "credits_estimate": sum(e["credits_estimate"] for e in ests),
+                   "seconds_estimate": round(sum(e["seconds_estimate"] for e in ests), 1), "sweep_values": len(ests)}
+            est["estimated_runtime_s"] = est["seconds_estimate"]
+        else:
+            est = _hosted_estimate(ctx, sim, spec, methods or [method], plan)
         mem, queue, ce = est["memory_bytes"], est["queue"], est["credits_estimate"]
         if queue is None:
             raise ApiError(422, "TooLarge", f"estimated memory {mem / 2**30:.1f} GiB does not fit any GPU tier",
@@ -228,6 +278,8 @@ def create_job(body: JobRequest, request: Request, p: Principal = Depends(princi
                            f"{plan.max_memory_bytes / 2**30:.0f} GiB limit of the {plan.name} plan", plan=plan.name)
     else:
         _validated(ctx, sim, spec, None)
+        for one, one_spec in swept:
+            _validated(ctx, one, one_spec, None)
 
     with ctx.db.session() as s:
         if s_.hosted:
@@ -241,6 +293,7 @@ def create_job(body: JobRequest, request: Request, p: Principal = Depends(princi
         job = Job(org_id=p.org_id, user_id=p.user_id, api_key_id=p.api_key_id, kind=body.kind,
                   problem_kind=kind_of(sim), method=method,
                   methods=methods, reference=body.reference, device=device, label=body.label, spec=spec,
+                  params=body.sweep.model_dump() if body.sweep else None,
                   spec_bytes=len(json.dumps(spec)), estimate=est, memory_bytes=mem, credits_estimate=ce, queue=queue)
         s.add(job)
         s.flush()

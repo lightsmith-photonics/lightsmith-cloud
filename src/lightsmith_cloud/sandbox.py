@@ -225,6 +225,13 @@ class Estimator:
             self._stop()
 
     def estimate(self, simulation: dict, method: str, device: str) -> dict:
+        return self._call({"simulation": simulation, "method": method, "device": device})
+
+    def discretization(self, simulation: dict, method: str) -> dict:
+        """What the backend will discretise (lightsmith.discretization), in the same sandboxed child as estimate."""
+        return self._call({"op": "discretization", "simulation": simulation, "method": method, "device": "cpu"})
+
+    def _call(self, payload: dict) -> dict:
         with self._lock:
             if self._proc is None or self._proc.poll() is not None or self._served >= self.max_requests:
                 self._stop()
@@ -233,8 +240,7 @@ class Estimator:
             rid = self._seq
             assert self._proc is not None and self._proc.stdin is not None
             try:
-                self._proc.stdin.write(json.dumps({"id": rid, "simulation": simulation, "method": method,
-                                                   "device": device}) + "\n")
+                self._proc.stdin.write(json.dumps({"id": rid, **payload}) + "\n")
                 self._proc.stdin.flush()
             except OSError:
                 self._stop()

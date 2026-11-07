@@ -123,7 +123,7 @@ def execute_job(ctx: "Context", job_id: str, worker: WorkerInfo | None = None,
         job.status, job.started_at, job.stage, job.progress = "running", utcnow(), "starting", 0.01
         append_events(ses, job, [("status", {"status": "running"})])
         request = {"kind": job.kind, "simulation": job.spec, "method": job.method, "methods": job.methods,
-                   "reference": job.reference, "device": _device_for(job, worker)}
+                   "reference": job.reference, "params": job.params, "device": _device_for(job, worker)}
 
     s.work_dir.mkdir(parents=True, exist_ok=True)
     workdir = Path(tempfile.mkdtemp(prefix=f"job-{job_id[:12]}-", dir=s.work_dir))

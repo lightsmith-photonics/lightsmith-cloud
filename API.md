@@ -102,15 +102,35 @@ Returns the library's `estimate()` output plus `estimated_runtime_s`. It never s
    "runtime_basis": "backend|calibrated|rough", "queue": "gpu-24g", "fits_plan": true, "plan": "free"}
   ```
 
+### `POST /v1/discretization`
+```json
+{"simulation": {...}, "method": "auto"}
+```
+What the backend will discretise for the problem, before any solve: the library's `discretization()` (see the
+library's `docs/discretization.md`), run in the same sandboxed worker as `estimate`, with the same validation and limits. It never
+solves and costs no credits. The response is the library's envelope:
+
+```json
+{"backend": "lightsmith-dda", "method": "dda", "problem_kind": "scattering", "layout_kind": "dipole_lattice",
+ "summary": {"dipoles": 2176, "spacing (nm)": 4.98}, "payload": {"points_nm": [[...]], "spacing_nm": 4.98},
+ "estimate": {...}, "warnings": [], "error": null}
+```
+
+`layout_kind` is `yee_grid`, `unit_cell`, `device_grid`, `dipole_lattice`, `surface_mesh`, `multipoles`,
+`harmonics`, `cross_section_grid`, `cells`, `plane_waves` or `none`. `error` carries the library's refusal of the
+problem while the geometry is still returned. A backend that cannot run the problem gives a 422; a server whose
+library has no `discretization()` gives `501 NotImplemented`.
+
 ### `POST /v1/jobs` → `202`
 ```json
 {"simulation": {...},             // alias "spec"; any problem kind
- "kind": "solve",                 // alias "operation": solve | compare | estimate | optimize (needs an optimization problem)
+ "kind": "solve",                 // alias "operation": solve | compare | estimate | optimize (needs an optimization problem) | sweep
  "method": "auto",                // solve/estimate: method or backend name
  "methods": ["mie", "dda"],       // compare: default = every applicable backend for the problem kind
  "reference": null,               // compare: default = Mie if run, else the first method
  "device": "auto",                // auto | cpu | gpu | cuda:N | torch-cpu
- "label": "optional text"}
+ "label": "optional text",
+ "sweep": {"path": ["particles", 0, "shape", "radius_nm"], "values": [30, 40, 50]}}  // sweep jobs only
 ```
 Returns `{"job_id", "id", "status": "queued", "credits_estimate": null|number, "queue": null|"gpu-24g",
 "quota_warning": null|string}`. `quota_warning` (hosted) is set when the job takes the org past 80% of
@@ -227,6 +247,19 @@ Close codes: `4401` unauthenticated, `4403` forbidden, `4404` unknown job, `1000
 `solve` of such a problem behaves the same way. It is long-running: progress arrives per iteration,
 and the plan's runtime cap applies. In hosted mode the credit estimate is rough: it is based on
 `max_iter × sources × 2` solves.
+
+### Sweep jobs
+`kind: "sweep"` solves the problem once per value of one number: `sweep.path` is the JSON path of that number in
+the problem (a geometry field, a wavelength, the medium index…) or in a backend's options
+(`["options", "dda", "dipoles_per_diameter"]`; missing objects are created), `sweep.values` 1 to 50 numbers. Every
+swept problem is validated and checked against the limits before the job is queued, so a bad value gives an
+immediate 422 that names it. The values run in order in one worker, with progress per value (`stage:
+"sweep_value"`). In hosted mode each value is estimated and priced, and the job's credit estimate is their sum.
+
+The result (`result_kind: "sweep"`) is `{"kind": "sweep", "path", "values", "method", "results": [<one result per
+value, or null>], "errors": {"<index>": {"error", "message"}}}`: a value whose solve fails is recorded and the sweep
+goes on. The job view repeats the request as `sweep: {path, values}`. Solves are independent: a sweep saves
+submissions and queue slots, not solver set-up, which changes with the swept field.
 
 ## Lightsmith Cloud only
 

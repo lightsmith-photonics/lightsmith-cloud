@@ -281,3 +281,44 @@ def test_hosted_refuses_unmigrated_database(tmp_path):
     s = Settings(mode="hosted", data_dir=tmp_path, allow_sqlite=True, api_key_pepper="x")
     with pytest.raises(RuntimeError, match="lightsmith-server migrate"):
         build_context(s, with_estimator=False)
+
+
+# --- discretization and sweeps ------------------------------------------------------------------------------------
+
+
+def test_discretization_shows_what_the_backend_discretises(local_client):
+    r = local_client.post("/v1/discretization", json={"simulation": gold_sphere(), "method": "dda"})
+    assert r.status_code == 200, r.text
+    out = r.json()
+    assert out["backend"] == "lightsmith-dda" and out["layout_kind"] == "dipole_lattice"
+    assert out["payload"]["n_dipoles"] == out["estimate"]["dipoles"] > 0
+    assert out["summary"]["dipoles"] == out["payload"]["n_dipoles"]
+    r = local_client.post("/v1/discretization", json={"simulation": gold_sphere(), "method": "rcwa"})
+    assert r.status_code == 422 and r.json()["error"] in ("UnsupportedProblem", "ValueError", "KeyError")
+
+
+def test_sweep_job_solves_each_value(local_client):
+    body = {"simulation": gold_sphere(num=5), "kind": "sweep", "method": "mie",
+            "sweep": {"path": ["particles", 0, "shape", "radius_nm"], "values": [20, 30, 40]}}
+    r = local_client.post("/v1/jobs", json=body)
+    assert r.status_code == 202, r.text
+    job = wait(local_client, r.json()["job_id"])
+    assert job["status"] == "succeeded", job
+    assert job["kind"] == "sweep" and job["sweep"] == {"path": ["particles", 0, "shape", "radius_nm"], "values": [20.0, 30.0, 40.0]}
+    res = job["result"]
+    assert res["kind"] == "sweep" and res["values"] == [20, 30, 40] and not res["errors"]
+    cext = [max(x["c_ext_nm2"]) for x in res["results"]]
+    assert cext[0] < cext[1] < cext[2]  # bigger spheres extinguish more
+
+
+def test_sweep_of_an_option_creates_it_and_bad_values_are_refused(local_client):
+    body = {"simulation": gold_sphere(num=3), "kind": "sweep", "method": "dda",
+            "sweep": {"path": ["options", "dda", "dipoles_per_diameter"], "values": [8, 10]}}
+    job = wait(local_client, local_client.post("/v1/jobs", json=body).json()["job_id"])
+    assert job["status"] == "succeeded", job
+    a, b = job["result"]["results"]
+    assert a["c_ext_nm2"] != b["c_ext_nm2"]  # a finer dipole lattice: a (slightly) different answer
+    bad = {**body, "sweep": {"path": ["particles", 0, "shape", "radius_nm"], "values": [10, -5]}}
+    r = local_client.post("/v1/jobs", json=bad)
+    assert r.status_code == 422 and "sweep value -5" in r.json()["message"]
+    assert local_client.post("/v1/jobs", json={**body, "sweep": None}).status_code == 422

@@ -369,6 +369,99 @@
         }
       }
     },
+    "/v1/discretization": {
+      "post": {
+        "summary": "Discretization",
+        "description": "What the backend will discretise for this problem (grid, mesh, dipole lattice, harmonics, cells, plane\nwaves), with its estimate: `lightsmith.discretization`, run in the same sandboxed child as estimate. Never solves.",
+        "operationId": "discretization_v1_discretization_post",
+        "parameters": [
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "name": "x-org-id",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 200
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Org-Id"
+            }
+          },
+          {
+            "name": "x-api-key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "maxLength": 200
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Api-Key"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DiscretizationRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": true,
+                  "title": "Response Discretization V1 Discretization Post"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/jobs": {
       "post": {
         "summary": "Create Job",
@@ -2689,6 +2782,29 @@
         "type": "object",
         "title": "CreditLimit"
       },
+      "DiscretizationRequest": {
+        "properties": {
+          "simulation": {
+            "additionalProperties": true,
+            "type": "object",
+            "title": "Simulation",
+            "description": "Any lightsmith problem as JSON (see GET /v1/schema). Without `kind` it is a scattering Simulation; other kinds: layer_stack, periodic, mode, device, bands, circuit, optimization. Alias: `spec`."
+          },
+          "method": {
+            "type": "string",
+            "maxLength": 64,
+            "title": "Method",
+            "description": "Method or backend name, or 'auto' (as for solve).",
+            "default": "auto"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "simulation"
+        ],
+        "title": "DiscretizationRequest"
+      },
       "ErrorBody": {
         "properties": {
           "error": {
@@ -2857,10 +2973,11 @@
               "solve",
               "compare",
               "estimate",
-              "optimize"
+              "optimize",
+              "sweep"
             ],
             "title": "Kind",
-            "description": "solve | compare | estimate (run as a job) | optimize (an optimization problem). Alias: `operation`.",
+            "description": "solve | compare | estimate (run as a job) | optimize (an optimization problem) | sweep (one solve per value of `sweep.path`). Alias: `operation`.",
             "default": "solve"
           },
           "method": {
@@ -2925,6 +3042,17 @@
             ],
             "title": "Label",
             "description": "Free text shown in job lists."
+          },
+          "sweep": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SweepParams"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "sweep: the swept field and its values."
           }
         },
         "additionalProperties": false,
@@ -2948,12 +3076,25 @@
           "kind": {
             "type": "string",
             "title": "Kind",
-            "description": "solve | compare | estimate | optimize."
+            "description": "solve | compare | estimate | optimize | sweep."
           },
           "operation": {
             "type": "string",
             "title": "Operation",
             "description": "Same as kind."
+          },
+          "sweep": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sweep",
+            "description": "sweep jobs: {path, values}."
           },
           "problem_kind": {
             "anyOf": [
@@ -3288,6 +3429,44 @@
           "simulation"
         ],
         "title": "SupportsRequest"
+      },
+      "SweepParams": {
+        "properties": {
+          "path": {
+            "items": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "integer"
+                }
+              ]
+            },
+            "type": "array",
+            "maxItems": 16,
+            "minItems": 1,
+            "title": "Path",
+            "description": "JSON path of the swept number, e.g. [\"particles\", 0, \"shape\", \"radius_nm\"] or [\"options\", \"dda\", \"dipoles_per_diameter\"] (missing objects are created)."
+          },
+          "values": {
+            "items": {
+              "type": "number"
+            },
+            "type": "array",
+            "maxItems": 50,
+            "minItems": 1,
+            "title": "Values",
+            "description": "The values, solved in this order."
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "path",
+          "values"
+        ],
+        "title": "SweepParams"
       },
       "Usage": {
         "properties": {
