@@ -1309,7 +1309,7 @@ wheels = [
 
 [[package]]
 name = "lightsmith"
-version = "0.2.0"
+version = "0.3.0"
 source = { editable = "../lightsmith" }
 dependencies = [
     { name = "array-api-compat" },
