@@ -2788,7 +2788,7 @@
             "additionalProperties": true,
             "type": "object",
             "title": "Simulation",
-            "description": "Any lightsmith problem as JSON (see GET /v1/schema). Without `kind` it is a scattering Simulation; other kinds: layer_stack, periodic, mode, device, bands, circuit, optimization. Alias: `spec`."
+            "description": "Any lightsmith problem as JSON (see GET /v1/schema). Without `kind` it is a scattering Simulation; other kinds: layer_stack, periodic, mode, device, bands, circuit, optimization, emission. Alias: `spec`."
           },
           "method": {
             "type": "string",
@@ -2830,7 +2830,7 @@
             "additionalProperties": true,
             "type": "object",
             "title": "Simulation",
-            "description": "Any lightsmith problem as JSON (see GET /v1/schema). Without `kind` it is a scattering Simulation; other kinds: layer_stack, periodic, mode, device, bands, circuit, optimization. Alias: `spec`."
+            "description": "Any lightsmith problem as JSON (see GET /v1/schema). Without `kind` it is a scattering Simulation; other kinds: layer_stack, periodic, mode, device, bands, circuit, optimization, emission. Alias: `spec`."
           },
           "method": {
             "type": "string",
@@ -2965,7 +2965,7 @@
             "additionalProperties": true,
             "type": "object",
             "title": "Simulation",
-            "description": "Any lightsmith problem as JSON (see GET /v1/schema). Without `kind` it is a scattering Simulation; other kinds: layer_stack, periodic, mode, device, bands, circuit, optimization. Alias: `spec`."
+            "description": "Any lightsmith problem as JSON (see GET /v1/schema). Without `kind` it is a scattering Simulation; other kinds: layer_stack, periodic, mode, device, bands, circuit, optimization, emission. Alias: `spec`."
           },
           "kind": {
             "type": "string",
@@ -3106,7 +3106,7 @@
               }
             ],
             "title": "Problem Kind",
-            "description": "scattering | layer_stack | periodic | mode | device | bands | circuit | optimization."
+            "description": "scattering | layer_stack | periodic | mode | device | bands | circuit | optimization | emission."
           },
           "status": {
             "type": "string",
@@ -3301,7 +3301,7 @@
               }
             ],
             "title": "Result Kind",
-            "description": "The result model's `kind` (cross_sections, spectrum, modes, sparameters, bands, optimization, ...), or compare / estimate."
+            "description": "The result model's `kind` (cross_sections, spectrum, modes, sparameters, bands, optimization, emission), or compare / estimate / sweep."
           },
           "result_url": {
             "anyOf": [
@@ -3420,7 +3420,7 @@
             "additionalProperties": true,
             "type": "object",
             "title": "Simulation",
-            "description": "Any lightsmith problem as JSON (see GET /v1/schema). Without `kind` it is a scattering Simulation; other kinds: layer_stack, periodic, mode, device, bands, circuit, optimization. Alias: `spec`."
+            "description": "Any lightsmith problem as JSON (see GET /v1/schema). Without `kind` it is a scattering Simulation; other kinds: layer_stack, periodic, mode, device, bands, circuit, optimization, emission. Alias: `spec`."
           }
         },
         "additionalProperties": false,

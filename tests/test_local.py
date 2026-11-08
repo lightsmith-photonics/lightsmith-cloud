@@ -197,6 +197,28 @@ def test_layer_stack_problem_kind(local_client):
     assert all(b["name"] != "lightsmith-dda" for b in support)
 
 
+def emission_problem(**extra) -> dict:
+    return {"kind": "emission", "medium_index": 1.33, "wavelengths": [500.0, 600.0],
+            "particles": [{"shape": {"kind": "sphere", "radius_nm": 40},
+                           "material": {"kind": "constant_index", "n_real": 2.0}}],
+            "dipole": {"position_nm": [0, 0, 60], "orientation": [0, 0, 1]}, **extra}
+
+
+def test_emission_problem_kind(local_client):
+    job = wait(local_client, local_client.post("/v1/jobs", json={"simulation": emission_problem()}).json()["job_id"])
+    assert job["status"] == "succeeded", job["error"]
+    assert job["problem_kind"] == "emission" and job["result_kind"] == "emission"
+    assert len(job["result"]["purcell"]) == 2 and min(job["result"]["purcell"]) > 0
+    too_many = emission_problem(radiation_pattern={"theta_deg": [0.0] * 2000, "phi_deg": [0.0] * 2000,
+                                                   "wavelengths_nm": [500.0]})
+    r = local_client.post("/v1/jobs", json={"simulation": too_many})
+    assert r.status_code == 422 and r.json()["error"] == "SpecTooLarge", r.text
+    crowded = emission_problem()
+    crowded["particles"] = crowded["particles"] * 1001
+    r = local_client.post("/v1/jobs", json={"simulation": crowded})
+    assert r.status_code == 422 and r.json()["error"] == "SpecTooLarge" and "particles" in r.json()["message"]
+
+
 def test_schema_is_problem_envelope(local_client):
     from lightsmith_cloud.problem import problem_json_schema
 

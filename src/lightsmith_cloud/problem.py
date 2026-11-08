@@ -1,7 +1,7 @@
 """Problem parsing across library versions.
 
 lightsmith accepts several problem kinds (``scattering``, ``layer_stack``,
-``periodic``, ``mode``, ``device``, ``bands``, ``circuit``) through
+``periodic``, ``mode``, ``device``, ``bands``, ``circuit``, ``optimization``, ``emission``) through
 ``lightsmith.problems.parse_problem``; a spec without ``kind`` is a v0.1
 scattering ``Simulation``. Older library versions only have ``Simulation``.
 """

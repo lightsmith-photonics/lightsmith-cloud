@@ -23,9 +23,9 @@ only.
 - **Content type.** Every request and response body is JSON, apart from the WebSocket stream.
 - **Specs: any problem kind.** `simulation` (alias `spec`) is any problem the scientific library
   accepts. `GET /v1/schema` describes all of them. `kind` selects one of `scattering` (the default
-  when `kind` is missing), `layer_stack`, `periodic`, `mode`, `device`, `bands`, `circuit` or `optimization`. Units
-  are nm, wavelengths are vacuum wavelengths, and the time convention is `exp(-iωt)`. Unknown fields
-  are rejected.
+  when `kind` is missing), `layer_stack`, `periodic`, `mode`, `device`, `bands`, `circuit`, `optimization` or
+  `emission` (a library newer than 0.2.0). Units are nm, wavelengths are vacuum wavelengths, and the time
+  convention is `exp(-iωt)`. Unknown fields are rejected.
 - **Non-finite numbers.** JSON has no NaN or Inf, so these are returned as `null`.
 - **Errors.** Every error is `{"error": "<Type>", "message": "<text>"}`, sometimes with extra fields
   such as `details: [{loc, msg, type}]` or `plan`. HTTP status codes:
@@ -171,8 +171,10 @@ Optional query parameters: `include_result=1` (default) and `include_spec=0`.
   | `sparameters` | `SParameterResult` |
   | `bands` | `BandResult` |
   | `optimization` | `OptimizationResult`: final design, history, validated S-parameters |
+  | `emission` | `EmissionResult`: Purcell and radiative enhancement, efficiency, radiation pattern |
   | `compare` | `{reference, results: {method: <result>}, relative_difference}` |
   | `estimate` | the `estimate()` dict |
+  | `sweep` | `{kind, path, values, method, results, errors}` (see Sweep jobs) |
 
   The result is inlined up to 25 MB (`LIGHTSMITH_INLINE_RESULT_MAX_BYTES`). Above that, `result`
   is `null`; use `result_url`.
@@ -398,15 +400,20 @@ limits on top.
 | `estimate()` run time | 60 s |
 | `estimate()` memory | 4 GiB |
 
-**Scattering only:**
+**Scattering and emission:**
 
 | Limit | Default |
 |---|---|
 | Particles | 1,000 |
 | Tabulated points per material | 20,000 |
 | Shells per particle | 50 |
+| Far-field samples (radiation pattern, for emission) | 2e6 |
+
+**Scattering only:**
+
+| Limit | Default |
+|---|---|
 | Near-field samples | 2e7 |
-| Far-field samples | 2e6 |
 | DDA lattice lower bound | 5e7 cells |
 
 Local mode has no runtime or memory cap on jobs unless `LIGHTSMITH_JOB_TIMEOUT_S` or

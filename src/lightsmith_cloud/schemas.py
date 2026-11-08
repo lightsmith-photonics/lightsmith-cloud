@@ -18,7 +18,7 @@ _SPEC = AliasChoices("simulation", "spec")
 
 
 SPEC_DOC = ("Any lightsmith problem as JSON (see GET /v1/schema). Without `kind` it is a scattering "
-            "Simulation; other kinds: layer_stack, periodic, mode, device, bands, circuit, optimization.")
+            "Simulation; other kinds: layer_stack, periodic, mode, device, bands, circuit, optimization, emission.")
 
 
 class EstimateRequest(_In):
@@ -87,7 +87,7 @@ class JobView(BaseModel):
     operation: str = Field(description="Same as kind.")
     sweep: dict[str, Any] | None = Field(None, description="sweep jobs: {path, values}.")
     problem_kind: str | None = Field(None, description="scattering | layer_stack | periodic | mode | device | bands | "
-                                     "circuit | optimization.")
+                                     "circuit | optimization | emission.")
     status: JobStatus
     progress: float = Field(description="0..1, coarse (started, per-method done).")
     message: str | None = Field(None, description="Short human-readable state, or the error message.")
@@ -108,7 +108,7 @@ class JobView(BaseModel):
     result: dict[str, Any] | None = Field(None, description="Result JSON (solve) or compare JSON; null until "
                                           "succeeded, or when larger than the inline limit (then use result_url).")
     result_kind: str | None = Field(None, description="The result model's `kind` (cross_sections, spectrum, modes, "
-                                    "sparameters, bands, optimization, ...), or compare / estimate.")
+                                    "sparameters, bands, optimization, emission), or compare / estimate / sweep.")
     result_url: str | None = None
     result_bytes: int | None = None
     simulation: dict[str, Any] | None = Field(None, description="The validated spec, with include_spec=1.")

@@ -43,13 +43,6 @@ def parse_simulation(raw: Any) -> BaseModel:
         raise ApiError(422, "ValidationError", str(e)[:4000], details=details) from None
 
 
-def _materials(sim: osc.Simulation):
-    for p in sim.particles:
-        yield from p.region_materials()
-    if sim.substrate is not None:
-        yield sim.substrate.material
-
-
 def _count(x: Any, depth: int = 0) -> int:
     if depth > 40:
         raise ApiError(422, "SpecTooLarge", "spec is nested too deeply")
@@ -72,19 +65,40 @@ def check_limits(problem: BaseModel, settings: Settings, spec: dict | None = Non
     _check_options(getattr(problem, "options", {}) or {}, s)
     if isinstance(problem, osc.Simulation):
         _check_scattering(problem, s)
+    elif kind_of(problem) == "emission":
+        _check_emission(problem, s)
 
 
-def _check_scattering(sim: osc.Simulation, s: Settings) -> None:
-    if len(sim.particles) > s.max_particles:
-        raise _too_large(f"{len(sim.particles)} particles; the limit is {s.max_particles}")
-    for p in sim.particles:
+def _check_material(m, s: Settings) -> None:
+    if isinstance(m, osc.Tabulated) and len(m.wavelength_nm) > s.max_tabulated_points:
+        raise _too_large(f"tabulated material with {len(m.wavelength_nm)} points; "
+                         f"the limit is {s.max_tabulated_points}")
+
+
+def _check_particles(particles: list, s: Settings) -> None:
+    if len(particles) > s.max_particles:
+        raise _too_large(f"{len(particles)} particles; the limit is {s.max_particles}")
+    for p in particles:
         shells = getattr(p.shape, "shells", [])
         if len(shells) > s.max_shells:
             raise _too_large(f"{len(shells)} shells on one particle; the limit is {s.max_shells}")
-    for m in _materials(sim):
-        if isinstance(m, osc.Tabulated) and len(m.wavelength_nm) > s.max_tabulated_points:
-            raise _too_large(f"tabulated material with {len(m.wavelength_nm)} points; "
-                             f"the limit is {s.max_tabulated_points}")
+        for m in p.region_materials():
+            _check_material(m, s)
+
+
+def _check_emission(problem: BaseModel, s: Settings) -> None:
+    _check_particles(problem.particles, s)
+    rp = problem.radiation_pattern
+    if rp is not None:
+        n = len(rp.theta_deg) * len(rp.phi_deg) * len(rp.wavelengths_nm)
+        if n > s.max_far_field_samples:
+            raise _too_large(f"radiation pattern asks for {n} samples; the limit is {s.max_far_field_samples}")
+
+
+def _check_scattering(sim: osc.Simulation, s: Settings) -> None:
+    _check_particles(sim.particles, s)
+    if sim.substrate is not None:
+        _check_material(sim.substrate.material, s)
     nf, ff = sim.outputs.near_field, sim.outputs.far_field
     if nf is not None and nf.points**2 * len(nf.wavelengths_nm) > s.max_near_field_samples:
         raise _too_large(f"near field asks for {nf.points}^2 x {len(nf.wavelengths_nm)} samples; "
