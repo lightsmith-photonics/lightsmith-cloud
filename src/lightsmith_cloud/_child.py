@@ -231,10 +231,14 @@ def _sweep(osc, req: dict, device: str, emit) -> dict:
 
 def serve() -> int:
     """Estimate worker: {"id", "op"?, "simulation", "method", "device"} in, {"id", "ok", "result"|"error"} out.
-    `op` is "estimate" (default) or "discretization" (what the backend will discretise; lightsmith.discretization)."""
+    `op` is "estimate" (default) or "discretization" (what the backend will discretise; lightsmith.discretization).
+    Sends {"ready": true} first, once the library is imported and the GPU initialised, which on a busy machine takes
+    far longer than any estimate."""
     proto = _protocol_stream()
     from .lib import osc
 
+    osc.doctor()  # initialises CUDA, as the first device="auto" request otherwise would
+    proto.write(json.dumps({"ready": True}) + "\n")
     for line in sys.stdin:
         if not line.strip():
             continue

@@ -199,8 +199,9 @@ class Estimator:
     """
 
     def __init__(self, workdir: Path, timeout_s: float = 60.0, memory_bytes: int | None = None,
-                 max_requests: int = 500):
+                 max_requests: int = 500, startup_timeout_s: float = 300.0):
         self.workdir, self.timeout_s, self.memory_bytes, self.max_requests = workdir, timeout_s, memory_bytes, max_requests
+        self.startup_timeout_s = startup_timeout_s
         self._lock = threading.Lock()
         self._proc: subprocess.Popen | None = None
         self._q: queue.Queue = queue.Queue()
@@ -214,6 +215,27 @@ class Estimator:
         threading.Thread(target=_pump, args=(self._proc.stdout, self._q, "out"), daemon=True).start()
         threading.Thread(target=_drain, args=(self._proc.stderr,), daemon=True).start()
         self._served = 0
+
+    def _await_ready(self) -> None:
+        """Wait for the worker to import the library and initialise the GPU: not the problem's doing, so this does
+        not count against the problem's time limit."""
+        t0 = time.monotonic()
+        while time.monotonic() - t0 <= self.startup_timeout_s:
+            try:
+                _, line = self._q.get(timeout=0.1)
+            except queue.Empty:
+                continue
+            if line is None:
+                self._stop()
+                raise EstimateError("WorkerCrashed", "estimate process exited while starting")
+            try:
+                if json.loads(line).get("ready"):
+                    return
+            except (ValueError, AttributeError):
+                continue
+        self._stop()
+        raise EstimateError("Timeout", f"the estimate worker did not start within {self.startup_timeout_s:g} s "
+                                       "(it loads the library and initialises the GPU); the machine may be too busy")
 
     def _stop(self) -> None:
         if self._proc is not None:
@@ -236,6 +258,7 @@ class Estimator:
             if self._proc is None or self._proc.poll() is not None or self._served >= self.max_requests:
                 self._stop()
                 self._start()
+                self._await_ready()
             self._seq += 1
             rid = self._seq
             assert self._proc is not None and self._proc.stdin is not None
@@ -267,7 +290,8 @@ class Estimator:
                     raise EstimateError(reply["error"], reply["message"])
                 if time.monotonic() - t0 > self.timeout_s:
                     self._stop()
-                    raise EstimateError("Timeout", f"estimate exceeded {self.timeout_s:g} s; the problem is too large")
+                    raise EstimateError("Timeout", f"estimate exceeded {self.timeout_s:g} s; the problem is too large, "
+                                                   "or the machine too busy, to size it in time")
                 if self.memory_bytes and tree_rss(self._proc.pid) > self.memory_bytes:
                     self._stop()
                     raise EstimateError("MemoryLimitExceeded",

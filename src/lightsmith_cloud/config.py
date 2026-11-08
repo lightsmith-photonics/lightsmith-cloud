@@ -86,6 +86,7 @@ class Settings(BaseSettings):
 
     # Sandboxed estimate process.
     estimate_timeout_s: float = 60.0
+    estimate_startup_timeout_s: float = 300.0  # importing the library and initialising a busy GPU
     estimate_memory_bytes: int = 4 * 2**30
 
     # Local-mode job caps (0 = unlimited). Hosted mode takes them from the plan.

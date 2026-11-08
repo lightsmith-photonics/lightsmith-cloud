@@ -41,6 +41,7 @@ def build_context(settings: Settings, *, redis=None, store: ResultStore | None =
                   billing=billing or StripeBilling(settings), redis=redis)
     if with_estimator:
         ctx.estimator = Estimator(settings.work_dir / "estimator", timeout_s=settings.estimate_timeout_s,
-                                  memory_bytes=settings.estimate_memory_bytes)
+                                  memory_bytes=settings.estimate_memory_bytes,
+                                  startup_timeout_s=settings.estimate_startup_timeout_s)
     ctx.limiter = RedisRateLimiter(redis) if redis is not None else MemoryRateLimiter()
     return ctx
