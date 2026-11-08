@@ -113,8 +113,10 @@ _DDA_S_PER_CELL_SOLVE = 3.0e-5
 # container on the dev box: trivial Mie jobs took 14.6 s cold and 3.4 s with a warm page cache.
 # A warm process pool would cut this.
 _STARTUP_S = 6.0
-# Placeholder for one FDFD solve inside inverse design; replace with a measurement per backend.
-_INVERSE_S_PER_SOLVE = 1.0
+# One FDFD solve inside 2D inverse design (3D reports its own estimate). Measured 2026-11-08 on the dev box's
+# CPU, loaded, with the tests' waveguide bend: 1.6-2.0 s per solve up to 150 x 150 cells, 14 s at 240 x 240.
+# The estimate stays rough: it ignores the grid, and the plan's runtime cap bounds a job that runs longer.
+_INVERSE_S_PER_SOLVE = 2.0
 
 
 def _runtime(est: dict[str, Any], n_wavelengths: int) -> tuple[float, str]:
