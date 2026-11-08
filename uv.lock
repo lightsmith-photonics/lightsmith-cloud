@@ -1309,7 +1309,7 @@ wheels = [
 
 [[package]]
 name = "lightsmith"
-version = "0.1.0"
+version = "0.2.0"
 source = { editable = "../lightsmith" }
 dependencies = [
     { name = "array-api-compat" },
@@ -1335,7 +1335,7 @@ gpu = [
 requires-dist = [
     { name = "array-api-compat", specifier = ">=1.11" },
     { name = "gdsfactory", marker = "python_full_version >= '3.11' and extra == 'layout'", specifier = ">=9" },
-    { name = "mcp", marker = "extra == 'mcp'", specifier = ">=1.2" },
+    { name = "mcp", marker = "extra == 'mcp'", specifier = ">=2.3,<3" },
     { name = "miepython", specifier = ">=3.0" },
     { name = "numpy", specifier = ">=2.0" },
     { name = "pydantic", specifier = ">=2.6" },
@@ -1349,6 +1349,11 @@ provides-extras = ["gpu", "mcp", "tmatrix", "layout", "xarray"]
 
 [package.metadata.requires-dev]
 dev = [{ name = "pytest", specifier = ">=8" }]
+docs = [
+    { name = "mkdocs", specifier = ">=1.6" },
+    { name = "mkdocs-material", specifier = ">=9.5" },
+    { name = "mkdocstrings", extras = ["python"], specifier = ">=0.26" },
+]
 
 [[package]]
 name = "lightsmith-cloud"
