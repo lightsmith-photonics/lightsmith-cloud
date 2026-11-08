@@ -282,6 +282,23 @@ def test_admission_rejects_job_too_big_for_gpu(hosted):
     assert not job["usage"]["credits"]
 
 
+def test_failed_job_on_a_cpu_worker_is_metered_at_the_cpu_rate(hosted):
+    # A solver error has no device report; the CPU-only worker must not bill it at the GPU tier's rate.
+    c = hosted.client
+    key = new_key(hosted)
+    sim = gold_sphere()
+    sim["particles"][0]["material"] = {"kind": "tabulated", "wavelength_nm": [500, 600],
+                                       "n_real": [0.5, 0.3], "n_imag": [2.0, 3.0]}
+    r = c.post("/v1/jobs", json={"simulation": sim, "method": "mie"}, headers=key)
+    assert r.status_code == 202, r.text
+    hosted.work()
+    job = wait(c, r.json()["job_id"], headers=key)
+    assert job["status"] == "failed" and job["error"]["error"] == "MaterialRangeError", job["error"]
+    u = job["usage"]
+    assert u["gpu_seconds"] == 0 and u["runtime_s"] > 0
+    assert u["credits"] == pytest.approx(u["runtime_s"] * hosted.ctx.settings.cpu_credit_multiplier, abs=2e-3)
+
+
 def test_cancel_queued_job_removes_it(hosted):
     c = hosted.client
     key = new_key(hosted)

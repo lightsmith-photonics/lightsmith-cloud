@@ -161,7 +161,10 @@ def _record(ctx: "Context", job_id: str, outcome: Outcome, size: int | None, wor
         job.runtime_s = round(outcome.runtime_s, 3)
         job.device_used = outcome.device or None
         job.warnings = outcome.warnings or None
-        on_gpu = str(outcome.device.get("device", "cpu")) != "cpu" if outcome.device else bool(worker)
+        # Without a device report (most failures), the job ran where the worker runs: a CPU-only worker
+        # (gpu_memory_bytes 0) is metered at the CPU rate, not the GPU tier's.
+        on_gpu = (str(outcome.device.get("device", "cpu")) != "cpu" if outcome.device
+                  else bool(worker and worker.gpu_memory_bytes))
         job.gpu_seconds = job.runtime_s if on_gpu else 0.0
         billed = s.hosted and not (outcome.error and outcome.error.get("error") in _NOT_BILLED)
         job.credits = credits_for(job.runtime_s, gpu=on_gpu, tier=s.tier(job.queue or ""), settings=s) if billed else None
