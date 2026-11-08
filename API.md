@@ -32,6 +32,7 @@ only.
 
   | Status | When |
   |---|---|
+  | 400 | `InvalidSignature`, `LiveModeRefused` (Stripe webhook) |
   | 401 | `Unauthorized` (with `WWW-Authenticate: Bearer`) |
   | 402 | `QuotaExceeded` |
   | 403 | `Forbidden` |
@@ -40,6 +41,8 @@ only.
   | 413 | `PayloadTooLarge`, `SpecTooLarge` |
   | 422 | `ValidationError`, `SpecTooLarge`, `UnknownMethod`, `UnsupportedProblem`, `TooLarge`, `TooLargeForPlan`, `Timeout` / `MemoryLimitExceeded` (estimate) |
   | 429 | `RateLimited` (with `Retry-After`), `ConcurrencyLimit` |
+  | 500 | `InternalError`, `WorkerCrashed` (the estimate process died) |
+  | 501 | `NotImplemented` (`POST /v1/discretization` on a library without `discretization()`) |
   | 502 | `BillingError` (Stripe refused or failed a call; the message is Stripe's) |
   | 503 | `QueueUnavailable`, `BillingDisabled` |
 
@@ -264,7 +267,7 @@ submissions and queue slots, not solver set-up, which changes with the swept fie
 ## Lightsmith Cloud only
 
 ### Identity and auth
-Users and orgs live in the platform (apps/web). This service stores only their ids, on jobs, API
+Users and orgs live in the platform (Lightsmith Community). This service stores only their ids, on jobs, API
 keys and usage, plus one `orgs` row per org id holding plan, quota and billing state. It never
 stores names, emails or other profile data.
 

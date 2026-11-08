@@ -10,11 +10,6 @@ from pydantic import AliasChoices, BaseModel, ConfigDict, Field
 JobStatus = Literal["queued", "running", "succeeded", "failed", "cancelled"]
 
 
-# Job kinds. "optimize" is a solve of an `optimization` problem (inverse design, method "inverse");
-# it streams one progress event per iteration. A plain "solve" of such a problem does the same.
-JOB_KINDS = ("solve", "compare", "estimate", "optimize", "sweep")
-
-
 class _In(BaseModel):
     model_config = ConfigDict(extra="forbid", populate_by_name=True)
 
@@ -49,6 +44,8 @@ class SupportsRequest(_In):
 
 
 class JobRequest(_In):
+    # "optimize" is a solve of an `optimization` problem (inverse design, method "inverse"); it streams one
+    # progress event per iteration. A plain "solve" of such a problem does the same.
     simulation: dict[str, Any] = Field(description=SPEC_DOC + " Alias: `spec`.", validation_alias=_SPEC)
     kind: Literal["solve", "compare", "estimate", "optimize", "sweep"] = Field(
         "solve", validation_alias=AliasChoices("kind", "operation"),

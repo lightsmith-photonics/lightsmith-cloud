@@ -11,6 +11,7 @@ from fastapi.testclient import TestClient
 
 from conftest import gold_sphere, make_local_app, wait
 from lightsmith_cloud.config import Settings
+from lightsmith_cloud.sandbox import EstimateError
 
 
 def test_info_endpoints(local_client):
@@ -294,7 +295,19 @@ def test_discretization_shows_what_the_backend_discretises(local_client):
     assert out["payload"]["n_dipoles"] == out["estimate"]["dipoles"] > 0
     assert out["summary"]["dipoles"] == out["payload"]["n_dipoles"]
     r = local_client.post("/v1/discretization", json={"simulation": gold_sphere(), "method": "rcwa"})
-    assert r.status_code == 422 and r.json()["error"] in ("UnsupportedProblem", "ValueError", "KeyError")
+    assert r.status_code == 422 and r.json()["error"] == "UnsupportedProblem", r.text
+    r = local_client.post("/v1/discretization", json={"simulation": gold_sphere(), "method": "nope"})
+    assert r.status_code == 422 and r.json()["error"] == "UnknownMethod", r.text
+
+
+def test_discretization_on_a_library_without_it_is_501(local_client, monkeypatch):
+    def no_support(*a, **k):
+        raise EstimateError("NotImplementedError", "this lightsmith has no discretization(); upgrade the library")
+
+    monkeypatch.setattr(local_client.app.state.ctx.estimator, "discretization", no_support)
+    r = local_client.post("/v1/discretization", json={"simulation": gold_sphere(), "method": "mie"})
+    assert r.status_code == 501 and r.json() == {
+        "error": "NotImplemented", "message": "this lightsmith has no discretization(); upgrade the library"}
 
 
 def test_sweep_job_solves_each_value(local_client):

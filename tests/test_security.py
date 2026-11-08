@@ -63,6 +63,13 @@ def test_body_limit(local_client):
 def test_bad_device_and_method(local_client):
     assert _post(local_client, gold_sphere(), device="cuda:0; rm -rf /").json()["error"] == "ValidationError"
     assert _post(local_client, gold_sphere(), method="nope").json()["error"] == "UnknownMethod"
+    # estimate answers with the same error names as jobs, not the library's exception types
+    r = local_client.post("/v1/estimate", json={"simulation": gold_sphere(), "method": "nope"})
+    assert r.status_code == 422 and r.json()["error"] == "UnknownMethod", r.text
+    pair = gold_sphere()
+    pair["particles"] = pair["particles"] * 2
+    r = local_client.post("/v1/estimate", json={"simulation": pair, "method": "mie"})
+    assert r.status_code == 422 and r.json()["error"] == "UnsupportedProblem", r.text
     r = _post(local_client, gold_sphere(substrate=None), method="mie")
     assert r.status_code == 202
     two = gold_sphere()

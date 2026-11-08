@@ -27,7 +27,7 @@ from ..lib import osc
 from ..limits import check_device, check_limits, parse_simulation, resolve_methods
 from ..problem import backends_for, kind_of, n_wavelengths, problem_json_schema
 from ..sandbox import EstimateError
-from ..schemas import JOB_KINDS, EstimateRequest, JobCreated, JobList, JobRequest, JobView, DiscretizationRequest, SupportsRequest
+from ..schemas import EstimateRequest, JobCreated, JobList, JobRequest, JobView, DiscretizationRequest, SupportsRequest
 from ..sweep import swept_specs
 
 router = APIRouter(prefix="/v1")
@@ -149,6 +149,7 @@ def estimate(body: EstimateRequest, request: Request, p: Principal = Depends(pri
     sim = parse_simulation(body.simulation)
     spec = sim.model_dump(mode="json")
     device = check_device(body.device)
+    resolve_methods(sim, "solve", body.method, None, ctx.settings)  # UnknownMethod / UnsupportedProblem, as jobs
     if not ctx.settings.hosted:
         _validated(ctx, sim, spec, None)
         est = run_estimate(ctx, spec, body.method, device)
@@ -170,6 +171,7 @@ def discretization(body: DiscretizationRequest, request: Request, p: Principal =
     ctx = get_ctx(request)
     sim = parse_simulation(body.simulation)
     spec = sim.model_dump(mode="json")
+    resolve_methods(sim, "solve", body.method, None, ctx.settings)  # UnknownMethod / UnsupportedProblem, as jobs
     if ctx.settings.hosted:
         with ctx.db.session() as s:
             plan = effective_plan(s.get(Org, p.org_id))
@@ -181,8 +183,9 @@ def discretization(body: DiscretizationRequest, request: Request, p: Principal =
     try:
         return ctx.estimator.discretization(spec, body.method)
     except EstimateError as e:
-        status = 500 if e.error == "WorkerCrashed" else 501 if e.error == "NotImplementedError" else 422
-        raise ApiError(status, e.error, e.message) from None
+        if e.error == "NotImplementedError":  # a library without discretization()
+            raise ApiError(501, "NotImplemented", e.message) from None
+        raise ApiError(500 if e.error == "WorkerCrashed" else 422, e.error, e.message) from None
 
 
 # --- jobs -------------------------------------------------------------------
@@ -228,8 +231,6 @@ def _load(s, p: Principal, job_id: str) -> Job:
 def create_job(body: JobRequest, request: Request, p: Principal = Depends(principal)) -> dict[str, Any]:
     ctx = get_ctx(request)
     s_ = ctx.settings
-    if body.kind not in JOB_KINDS:
-        raise ApiError(422, "NotImplemented", f"job kind {body.kind!r} is not available yet; use one of {list(JOB_KINDS)}")
     sim = parse_simulation(body.simulation)
     if body.kind == "optimize" and kind_of(sim) != "optimization":
         raise ApiError(422, "ValidationError", f"optimize jobs need an optimization problem, not {kind_of(sim)!r}")
