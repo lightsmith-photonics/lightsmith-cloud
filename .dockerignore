@@ -1,4 +1,4 @@
-# Build context is services/compute (self-contained; becomes the lightsmith-cloud repo root).
+# Build context is the repository root.
 .venv
 **/__pycache__
 **/*.pyc

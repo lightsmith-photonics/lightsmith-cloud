@@ -15,8 +15,7 @@ The Lightsmith job API, around the `lightsmith` scientific library. The same cod
 **Contract.** The API is described in [API.md](API.md) and [openapi.json](openapi.json). Deployment
 and GPU hosting costs are in [deploy/README.md](deploy/README.md).
 
-This directory is self-contained: it is the future `lightsmith-cloud` repository, and every
-Docker build uses it as the context.
+Every Docker build uses this repository as the context.
 
 ## Local mode
 
@@ -59,8 +58,9 @@ docker compose up -d                    # postgres, redis, migrate (one-shot), a
 - `docker/worker.Dockerfile`: a CUDA worker on the PyTorch CUDA 12.8 base.
 
 **Dependencies.** Python dependencies are pinned in `requirements/hosted.txt`, exported from
-`uv.lock`. The library comes from the `LIBRARY_SPEC` build arg, either a wheel in `./wheels` or a git
-URL, until it is published.
+`uv.lock`. The library comes from the `LIBRARY_SPEC` build arg: a release (`lightsmith==0.2.0`), a
+wheel in `./wheels` or a git URL. `POST /v1/discretization` needs a library newer than 0.2.0 and
+answers `501` otherwise.
 
 **Without Docker:**
 
@@ -98,7 +98,7 @@ LIGHTSMITH_MODE=hosted DATABASE_URL=... REDIS_URL=... LIGHTSMITH_API_KEY_PEPPER=
 - `src/lightsmith_cloud/lib.py` is the only module that imports the library, so moving or renaming
   it is a change to that file and the dependency name.
 - For development the library is a path dependency on a sibling checkout (`../lightsmith`). Docker
-  images take it from `LIBRARY_SPEC` instead. Switch to a git or index source once it is published.
+  images take it from `LIBRARY_SPEC` instead.
 - `proposals/library-progress.diff` adds an optional `progress` callback to `solve`/`compare`.
   The child already uses it when present.
 
@@ -172,9 +172,12 @@ uv run python -c "from sqlalchemy import create_engine; from lightsmith_cloud im
 ## Tests
 
 ```bash
-uv run pytest                    # local end-to-end, security, Cloud (fakeredis + RQ), Stripe billing, migrations
-uv run pytest -m gpu             # the GPU job test (skipped without CUDA)
+uv sync --extra hosted --extra gpu   # the Cloud tests import redis, rq and stripe; torch runs the optimize and GPU tests
+uv run pytest                        # local end-to-end, security, Cloud (fakeredis + RQ), Stripe billing, migrations
+uv run pytest -m gpu                 # only the GPU job test (skipped without CUDA)
 ```
+
+Without `--extra gpu`, the optimize test and the GPU test are skipped; everything else runs.
 
 To run the Cloud tests against Postgres (the database is wiped before each test):
 

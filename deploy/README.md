@@ -7,7 +7,7 @@ and a suggested pricing model.
 ## Architecture
 
 ```
-apps/web ──JWT──►  API (CPU, N replicas) ──► Postgres (jobs, events, orgs, keys, usage)
+Community ─JWT──►  API (CPU, N replicas) ──► Postgres (jobs, events, orgs, keys, usage)
 studio  ──key──►    │  validate, estimate()   ├─► Redis (RQ queues, one per GPU tier; rate limits)
                     │  quota, admission       └─► S3-compatible bucket (results) or a shared volume
                     ▼
@@ -33,15 +33,14 @@ studio  ──key──►    │  validate, estimate()   ├─► Redis (RQ qu
 
 ## Running it
 
-Everything runs from this directory, which is the build context and the future `lightsmith-cloud`
-repo root:
+Everything runs from the repository root, which is the build context:
 
 ```bash
 cp .env.example .env
 ```
 
 In `.env`, set:
-- `LIBRARY_SPEC`: the library wheel or git URL, see below.
+- `LIBRARY_SPEC`: the library release, wheel or git URL, see below.
 - `POSTGRES_PASSWORD`, `LIGHTSMITH_API_KEY_PEPPER`, `LIGHTSMITH_ADMIN_TOKEN` and
   `PLATFORM_JWT_SECRET`.
 - Stripe values, with **test** keys only.
@@ -78,29 +77,30 @@ docker compose --profile cpu up -d postgres redis migrate api worker-cpu
 - Results are shared through the `results` volume unless `LIGHTSMITH_S3_BUCKET` is set.
 - Hosted mode refuses SQLite and refuses to start on an out-of-date schema.
 
-**The library dependency.** Until the library is published, `LIBRARY_SPEC` is any pip requirement:
+**The library dependency.** `LIBRARY_SPEC` is any pip requirement:
+- A release from PyPI: `LIBRARY_SPEC=lightsmith==0.2.0`.
 - A wheel copied into `./wheels`. Build it with `uv build --wheel <library checkout> --out-dir wheels`,
-  then set `LIBRARY_SPEC=wheels/lightsmith-0.1.0-py3-none-any.whl`.
+  then set `LIBRARY_SPEC=wheels/lightsmith-0.2.0-py3-none-any.whl`.
 - A git URL: `LIBRARY_SPEC=lightsmith @ git+https://github.com/lightsmith-photonics/lightsmith@<tag>`.
 
-Either way it is installed with `requirements/hosted.txt` as constraints. That file is the pinned
+Whichever it is, it is installed with `requirements/hosted.txt` as constraints. That file is the pinned
 export of `uv.lock`; regenerate it after `uv lock` with the command at its top.
+
+`POST /v1/discretization` needs a library with `lightsmith.discretization()`, which came after the
+0.2.0 release; with 0.2.0 that endpoint answers `501 NotImplemented` until the next release (or use
+a wheel or git URL of the library's `main`).
 
 **One worker per GPU.** On a multi-GPU host, run one `worker` container per GPU, each reserving one
 device (`device_ids: ["<i>"]` in compose). Each worker detects its GPU's memory and
 serves the largest tier that fits, plus every smaller tier after it. Set `LIGHTSMITH_WORKER_QUEUES` to
 override.
 
-**Stripe setup (test mode).** Create the following in a Stripe *test* account:
-- A Product with a monthly price for each paid plan (`LIGHTSMITH_STRIPE_PRICE_PRO`, `..._TEAM`).
-- A Billing Meter whose event name is `lightsmith_credits`, aggregated by sum.
-- A metered price on that meter (`LIGHTSMITH_STRIPE_PRICE_METERED`). Its first graduated tier should be
-  $0 for the plan's included credits.
-- A webhook endpoint pointing at `/v1/billing/webhook`, subscribed to `checkout.session.completed`,
-  `customer.subscription.*` and `invoice.payment_failed`.
-
-For local testing, `stripe listen --forward-to localhost:8200/v1/billing/webhook` prints the signing
-secret. The service refuses `sk_live_` keys and `livemode: true` events.
+**Stripe setup (test mode).** `lightsmith-server stripe-setup` creates the meter, the prices and the
+portal configuration in a Stripe *test* account and prints the `LIGHTSMITH_STRIPE_*` lines for `.env`;
+the [main README](../README.md#stripe-billing-test-mode-only) has the full procedure, including the
+webhook endpoint (`/v1/billing/webhook`) and its events. The metered prices have no free tier, because
+this service sends Stripe only the credits beyond the plan's included ones. The service refuses
+`sk_live_` keys and `livemode: true` events.
 
 **Production checklist.**
 - Postgres with backups.

@@ -10,7 +10,7 @@
 name: lightsmith-cloud
 
 x-build-args: &build-args
-  LIBRARY_SPEC: ${LIBRARY_SPEC:?set LIBRARY_SPEC in .env (wheel path under ./wheels, or a git URL)}
+  LIBRARY_SPEC: ${LIBRARY_SPEC:?set LIBRARY_SPEC in .env (a release such as lightsmith==0.2.0, a wheel path under ./wheels, or a git URL)}
 
 x-app: &app
   env_file: .env
@@ -80,7 +80,7 @@ services:
     environment:
       <<: *app-env
       LIGHTSMITH_WORKER_GPU_MEMORY_BYTES: "0"
-      LIGHTSMITH_WORKER_QUEUES: gpu-24g,gpu-80g
+      LIGHTSMITH_WORKER_QUEUES: gpu-12g,gpu-24g,gpu-80g  # every tier of LIGHTSMITH_GPU_TIERS: nothing else serves them here
     healthcheck: { test: ["CMD", "lightsmith-worker", "healthcheck"], interval: 30s, timeout: 10s, retries: 3 }
     depends_on:
       migrate: { condition: service_completed_successfully }

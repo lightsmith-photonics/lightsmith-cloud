@@ -3,8 +3,9 @@
 #   docker build -f docker/api.Dockerfile --build-arg LIBRARY_SPEC=<spec> -t lightsmith-cloud-api .
 #
 # The build context is this directory (the lightsmith-cloud repo root). LIBRARY_SPEC is any pip
-# requirement for the scientific library until it is published, e.g.
-#   wheels/lightsmith-0.1.0-py3-none-any.whl                      (a wheel copied into ./wheels)
+# requirement for the scientific library, e.g.
+#   lightsmith==0.2.0                                             (a release from PyPI)
+#   wheels/lightsmith-0.2.0-py3-none-any.whl                      (a wheel copied into ./wheels)
 #   "lightsmith @ git+https://github.com/lightsmith-photonics/lightsmith@<tag>"     (a git URL)
 ARG PYTHON_VERSION=3.12
 
