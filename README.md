@@ -99,8 +99,8 @@ LIGHTSMITH_MODE=hosted DATABASE_URL=... REDIS_URL=... LIGHTSMITH_API_KEY_PEPPER=
   it is a change to that file and the dependency name.
 - For development the library is a path dependency on a sibling checkout (`../lightsmith`). Docker
   images take it from `LIBRARY_SPEC` instead.
-- `proposals/library-progress.diff` adds an optional `progress` callback to `solve`/`compare`.
-  The child already uses it when present.
+- The child passes `progress=` to the library's `solve` (since 0.3.0), so jobs report as they go. An older library
+  still works, with progress per method only.
 
 ## Stripe billing (test mode only)
 

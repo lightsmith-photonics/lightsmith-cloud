@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import time
 from types import SimpleNamespace
 
 from lightsmith_cloud._child import _finite, _solver
@@ -31,3 +32,20 @@ def test_coarse_without_callback_support():
 
 def test_non_finite_floats_become_null():
     assert _finite({"a": [1.0, float("nan"), float("inf")], "b": (2.0,)}) == {"a": [1.0, None, None], "b": [2.0]}
+
+
+def test_progress_holds_when_the_fraction_is_unknown():
+    """An FDTD run does not know when it will end: events keep the last known fraction, never fall back to the start."""
+    def solve(problem, method, device, progress=None):
+        progress({"stage": "solve_started", "fraction": 0.0})
+        progress({"stage": "dda_solve", "fraction": 0.5})
+        time.sleep(0.6)  # past the two-events-per-second throttle
+        progress({"stage": "fdtd_steps", "fraction": None, "steps": 100, "max_steps": 1000})
+        progress({"stage": "solve_done", "fraction": 1.0})
+        return "result"
+
+    events = []
+    fn = _solver(SimpleNamespace(solve=solve), lambda **e: events.append(e))
+    assert fn({}, "fdtd", "cuda:0", 0.0, 1.0) == "result"
+    held = [e for e in events if e["stage"] == "fdtd_steps"]
+    assert held and held[0]["progress"] == 0.5 and held[0]["steps"] == 100

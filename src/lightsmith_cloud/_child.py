@@ -59,22 +59,24 @@ def _limit_resources(req: dict) -> None:
 
 def _solver(osc, emit):
     """osc.solve, forwarding fine-grained progress when the library supports callbacks
-    (see proposals/library-progress.diff); otherwise progress stays coarse."""
+    (lightsmith.progress, since 0.3.0); otherwise progress stays coarse."""
     import inspect
 
     if "progress" not in inspect.signature(osc.solve).parameters:
         return lambda problem, method, device, lo, hi: osc.solve(problem, method, device)
 
     def solve(problem, method, device, lo, hi):
-        last = [0.0]
+        last, fraction = [0.0], [0.0]
 
         def cb(e: dict) -> None:
+            if e.get("fraction") is not None:  # None: the end is not known (an FDTD run stops when fields decay)
+                fraction[0] = e["fraction"]
             now = time.monotonic()
             if e.get("stage") not in ("solve_started", "solve_done") and now - last[0] < 0.5:
                 return  # throttle: at most two events per second
             last[0] = now
             info = {k: v for k, v in e.items() if k not in ("stage", "fraction") and isinstance(v, (str, int, float))}
-            emit(type="progress", stage=e.get("stage", "solving"), progress=lo + (hi - lo) * (e.get("fraction") or 0.0),
+            emit(type="progress", stage=e.get("stage", "solving"), progress=lo + (hi - lo) * fraction[0],
                  **{"method": method, **info})
 
         return osc.solve(problem, method, device, progress=cb)

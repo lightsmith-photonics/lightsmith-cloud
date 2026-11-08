@@ -234,9 +234,9 @@ ends:
    "objective": 0.83, "binarization": 0.61, "beta": 8.0, "evaluations": 8, "elapsed_s": 41.2, "progress": 0.236}
   ```
 
-- Other jobs are coarse today: they report start, then progress per method. Once the library takes
-  a `progress=` callback, the same events carry finer stages without any change to this API, for
-  example `dda_solve` with `wavelength_nm`.
+- Other jobs report start and progress per method, plus finer stages from the library (0.3.0 or newer):
+  `dda_solve`, `bem_solve` and `fdfd_solve` with `wavelength_nm`, and `fdtd_steps` with `steps` and `max_steps`.
+  An FDTD run stops when its fields have decayed, so its `progress` holds until the end unless `run_time_fs` fixes it.
 - To reconnect, pass the last `seq` you received as `after`.
 
 **Hosted auth on the WebSocket.** In order of preference:
